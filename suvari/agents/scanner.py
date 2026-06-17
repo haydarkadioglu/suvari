@@ -4,6 +4,7 @@ AI analyzes recon data and decides which tools to run.
 """
 
 import time
+import sys
 from urllib.parse import urlparse, urlunparse
 from .base import BaseAgent, fmt_time
 from ..prompt_loader import PromptLoader
@@ -20,17 +21,10 @@ def clean_url(url: str) -> str:
 class ScannerAgent(BaseAgent):
     """Vulnerability scanning — AI decides which tools to use."""
 
-    # Max time per tool (safety limit for subprocess)
     TOOL_MAX_TIMES = {
-        "nuclei": 120,
-        "nikto": 150,
-        "gobuster": 90,
-        "ffuf": 90,
-        "sqlmap": 210,
-        "wpscan": 150,
-        "httpx": 30,
-        "curl": 15,
-        "nmap": 90,
+        "nuclei": 120, "nikto": 150, "gobuster": 90,
+        "ffuf": 90, "sqlmap": 210, "wpscan": 150,
+        "httpx": 30, "curl": 15, "nmap": 90,
     }
 
     def run(self, context: dict) -> dict:
@@ -40,7 +34,6 @@ class ScannerAgent(BaseAgent):
 
         self.log(f" Scanning: {url}")
 
-        # Combine recon output for AI context
         recon_text = "\n\n".join([
             f"=== {k} ===\n{v[:1500]}"
             for k, v in recon_results.items()
@@ -52,9 +45,7 @@ class ScannerAgent(BaseAgent):
         # AI picks the tools
         loader = PromptLoader(url, fast)
         prompt = loader.render_with_shared("scanner",
-            recon_data=recon_text[:4000],
-            available_tools=avail,
-        )
+            recon_data=recon_text[:4000], available_tools=avail)
 
         self.log(f"  AI planning tool selection...")
         t0 = time.time()
@@ -62,8 +53,7 @@ class ScannerAgent(BaseAgent):
         try:
             plan = self.llm.chat_json(
                 messages=[{"role": "user", "content": prompt}],
-                temperature=0.2,
-            )
+                temperature=0.2)
             plan_time = fmt_time(time.time() - t0)
             tool_plan = plan if isinstance(plan, list) else plan.get("tools", [])
             strategy = plan.get("strategy", "") if isinstance(plan, dict) else ""
@@ -72,16 +62,11 @@ class ScannerAgent(BaseAgent):
             self.log(f"  AI plan ready ({plan_time}): {[t.get('tool','?') for t in tool_plan]}")
         except Exception as e:
             self.log(f"  AI plan error: {e}, using fallback")
-            tool_plan = [
-                {"tool": "nuclei", "args": ["-silent", "-severity", "critical,high,medium"],
-                 "reason": "Fallback: broad CVE scan"}
-            ]
+            tool_plan = [{"tool": "nuclei", "args": ["-silent", "-severity", "critical,high,medium"],
+                         "reason": "Fallback: broad CVE scan"}]
 
-        # Limit tools based on mode
         max_tools = 3 if fast else 5
         tool_plan = tool_plan[:max_tools]
-
-        # Filter to available tools only
         tool_plan = [t for t in tool_plan if t.get("tool") in avail]
 
         if not tool_plan:
@@ -100,11 +85,25 @@ class ScannerAgent(BaseAgent):
             reason = item.get("reason", "")
             max_time = self.TOOL_MAX_TIMES.get(tool_name, 60)
 
-            # Build command
             cmd = self._build_cmd(tool_name, args, url)
             if not cmd:
                 self.log(f"  Unknown tool: {tool_name}, skipping")
                 continue
+
+            # Ask user before slow tools
+            if max_time > 30:
+                try:
+                    self.log(f"  {tool_name} — {reason[:80]}")
+                    self.log(f"     (estimated: up to {max_time}s)")
+                    ans = input(f"     Run {tool_name}? [Y/n] ").strip().lower()
+                    if ans in ("n", "no"):
+                        self.log(f"     Skipped (user declined)")
+                        results[tool_name] = "(skipped by user)"
+                        results[f"{tool_name}_time"] = "skipped"
+                        results[f"{tool_name}_status"] = "SKIPPED"
+                        continue
+                except (EOFError, KeyboardInterrupt):
+                    pass
 
             # Execute
             self.log(f"  {tool_name} — {reason[:80]}")
@@ -113,16 +112,17 @@ class ScannerAgent(BaseAgent):
             elapsed = time.time() - t0
             elapsed_str = fmt_time(elapsed)
 
-            # Determine status
-            is_error = output.startswith("(")
             if "TIMEOUT" in output:
                 status = "TIMEOUT"
-            elif is_error:
-                status = "ERROR"
+            elif output.startswith("("):
+                status = f"ERROR:{output[1:20]}"
             else:
                 status = "OK"
 
+            out_preview = output[:80].replace("\n", " ").strip()
             self.log(f"     [{status}] {tool_name} ({elapsed_str})")
+            if status != "OK":
+                self.log(f"     -> {out_preview}")
 
             self.ws.save_result("scans", tool_name, output)
             results[tool_name] = output
@@ -135,7 +135,6 @@ class ScannerAgent(BaseAgent):
         return results
 
     def _build_cmd(self, tool_name: str, args: list, url: str):
-        """Build command list for a tool."""
         builders = {
             "nuclei": lambda: args + ["-u", url],
             "nikto": lambda: args + [url],
@@ -148,7 +147,4 @@ class ScannerAgent(BaseAgent):
             "nmap": lambda: args + [url.split("://")[-1].split("/")[0]],
         }
         builder = builders.get(tool_name)
-        if builder:
-            return builder()
-        # Unknown tool, try as-is with args + url
-        return args + [url]
+        return builder() if builder else args + [url]
