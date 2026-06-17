@@ -242,6 +242,8 @@ class ScanChain:
                 text = text[:-3].strip()
             if text.startswith("json"):
                 text = text[4:].strip()
+            if text.startswith("n") or text.startswith("'"):
+                text = text.strip("'\n ")  # Remove stray quotes/newlines
 
             try:
                 return json.loads(text)

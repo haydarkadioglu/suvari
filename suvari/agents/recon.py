@@ -40,16 +40,20 @@ class ReconAgent(BaseAgent):
 
         # Run independent tasks in parallel
         with ThreadPoolExecutor(max_workers=4) as executor:
-            futures = {}
+            futures = {}  # future -> (name, submit_time)
 
             # 1. whatweb
             if self.tools.check_tool("whatweb"):
-                futures[executor.submit(self.tools.run, ["whatweb", url], 30)] = "whatweb"
+                t = time.time()
+                fut = executor.submit(self.tools.run, ["whatweb", url], 30)
+                futures[fut] = ("whatweb", t)
             else:
                 results["whatweb"] = "(not installed)"
 
             # 2. curl headers
-            futures[executor.submit(self.tools.run, ["curl", "-sI", "-L", url, "--max-time", "10"], 15)] = "headers"
+            t = time.time()
+            fut = executor.submit(self.tools.run, ["curl", "-sI", "-L", url, "--max-time", "10"], 15)
+            futures[fut] = ("headers", t)
 
             # 3. nmap
             if self.tools.check_tool("nmap"):
@@ -57,25 +61,31 @@ class ReconAgent(BaseAgent):
                 is_server = context.get("server_scan", False)
                 if is_server:
                     nmap_cmd = ["nmap", "-sV", "--top-ports", "1000", "--open", host]
-                    futures[executor.submit(self.tools.run, nmap_cmd, 180)] = "nmap"
+                    t = time.time()
+                    fut = executor.submit(self.tools.run, nmap_cmd, 180)
+                    futures[fut] = ("nmap", t)
                 else:
                     nmap_cmd = ["nmap", "-T4", "-F", "--open", host]
-                    futures[executor.submit(self.tools.run, nmap_cmd, 60)] = "nmap"
+                    t = time.time()
+                    fut = executor.submit(self.tools.run, nmap_cmd, 60)
+                    futures[fut] = ("nmap", t)
             else:
                 results["nmap"] = "(not installed)"
 
-            # 4. robots.txt + common paths (combined curl check)
-            futures[executor.submit(self.tools.run, ["curl", "-sL", f"{url.rstrip('/')}/robots.txt", "--max-time", "8"], 12)] = "robots"
+            # 4. robots.txt
+            t = time.time()
+            fut = executor.submit(self.tools.run, ["curl", "-sL", f"{url.rstrip('/')}/robots.txt", "--max-time", "8"], 12)
+            futures[fut] = ("robots", t)
 
             # Collect results as they complete
             for fut in as_completed(futures):
-                name = futures[fut]
-                t1 = time.time()
+                name, submit_time = futures[fut]
                 try:
                     output = fut.result()
                 except Exception as e:
                     output = f"(error: {e})"
-                elapsed = fmt_time(time.time() - t1)
+                elapsed = fmt_time(time.time() - submit_time)
+                self.log(f"  {name} done in {elapsed}")
 
                 if name == "whatweb":
                     self.log(f"  whatweb done in {elapsed}")
