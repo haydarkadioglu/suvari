@@ -178,7 +178,7 @@ class ChatSession:
             console.print("[dim]Server mode (all ports)[/dim]")
         console.print()
 
-        # Run orchestrator - use auto mode to avoid spinner/input conflict
+        # Run orchestrator
         ws = Workspace(url)
         orchestrator = SuvariOrchestrator(
             target_url=url,
@@ -186,7 +186,7 @@ class ChatSession:
             recon_only=False,
             fast=fast,
             verbose=False,
-            scan_mode=ScanMode.AUTO,  # Auto mode = no prompts during scan
+            scan_mode=ScanMode.GUIDED,
             source_dir=source,
             server_scan=server,
         )

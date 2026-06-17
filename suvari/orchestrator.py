@@ -6,6 +6,7 @@ Inspired by Shannon's multi-agent pipeline + LuaN1aoAgent's P-E-R framework.
 from typing import Optional
 from pathlib import Path
 from rich.console import Console
+from rich.progress import Progress, SpinnerColumn, TextColumn
 from .llm import LLMClient
 from .workspace import Workspace
 from .tools.runner import ToolRunner
@@ -18,7 +19,7 @@ from .state import PipelineState
 from .core import Planner, Reflector
 from .prompt_loader import PromptLoader
 from .scan_logger import ScanLogger
-from .mode import ScanMode, ask_question, show_finding, chat_after_recon, chat_after_scan, chat_before_exploit
+from .mode import ScanMode
 
 console = Console()
 
@@ -98,38 +99,46 @@ class SuvariOrchestrator:
         if not is_resume:
             self.state.start(self.target_url)
 
-        for phase_id, phase_name, phase_desc in phases:
-            console.print(f"[bold]{phase_name}[/bold] — {phase_desc}")
-            self.state.phase_start(phase_id)
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            console=console,
+        ) as progress:
 
-            try:
-                plan = self.planner.decide(
-                    phase=phase_id, completed=self.state.completed, last_results=self.context)
-                action = plan.get("next_action", phase_id)
-                if self.verbose:
-                    console.print(f"  [dim]Plan: {plan.get('reasoning', '')[:100]}[/dim]")
+            for phase_id, phase_name, phase_desc in phases:
+                task = progress.add_task(f"{phase_name} — {phase_desc}", total=None)
+                self.state.phase_start(phase_id)
 
-                self._run_phase(phase_id)
-
-                if phase_id != "report":
-                    phase_output = self._get_phase_output(phase_id)
-                    reflection = self.reflector.analyze(
-                        last_action=phase_id, tool=action, output=phase_output,
-                        target_url=self.target_url)
-                    for finding in reflection.get("findings", []):
-                        self.planner.add_knowledge(finding)
+                try:
+                    plan = self.planner.decide(
+                        phase=phase_id, completed=self.state.completed, last_results=self.context)
+                    action = plan.get("next_action", phase_id)
                     if self.verbose:
-                        s = reflection.get("success", False)
-                        f = len(reflection.get("findings", []))
-                        console.print(f"  [dim]Reflection: {'OK' if s else '?'} {f} findings[/dim]")
+                        console.print(f"  [dim]Plan: {plan.get('reasoning', '')[:100]}[/dim]")
 
-                self.state.phase_complete(phase_id)
+                    self._run_phase(phase_id)
 
-            except Exception as e:
-                console.print(f"\n[red]❌ {phase_name} error: {e}[/red]")
-                self.context["error"] = str(e)
-                self.state.set_error(str(e))
-                break
+                    if phase_id != "report":
+                        phase_output = self._get_phase_output(phase_id)
+                        reflection = self.reflector.analyze(
+                            last_action=phase_id, tool=action, output=phase_output,
+                            target_url=self.target_url)
+                        for finding in reflection.get("findings", []):
+                            self.planner.add_knowledge(finding)
+                        if self.verbose:
+                            s = reflection.get("success", False)
+                            f = len(reflection.get("findings", []))
+                            console.print(f"  [dim]Reflection: {'OK' if s else '?'} {f} findings[/dim]")
+
+                    self.state.phase_complete(phase_id)
+
+                except Exception as e:
+                    console.print(f"\n[red]❌ {phase_name} error: {e}[/red]")
+                    self.context["error"] = str(e)
+                    self.state.set_error(str(e))
+                    break
+                finally:
+                    progress.remove_task(task)
 
         self._show_results()
 
@@ -161,22 +170,12 @@ class SuvariOrchestrator:
             console.print(f"  {self.target_url}")
             self.context["recon_results"] = self.recon_agent.run(self.context)
             self.logger.info("phase", "Recon complete")
-            if self.mode.suggestions_enabled:
-                s = chat_after_recon(self.context.get("recon_results", {}), self.mode.suggestions_enabled)
-                if s:
-                    self.context["user_suggestions"] = s
-                    self.logger.info("phase", f"User suggestion: {s}")
 
         elif phase_id == "scan":
             self.context["scan_results"] = self.scanner_agent.run(self.context)
             scan_ok = self.context.get("scan_results", {})
             tools_run = [k for k in scan_ok if not k.endswith("_time") and not k.endswith("_status") and not k.startswith("_")]
             self.logger.info("phase", f"Scan complete: {tools_run}")
-            if self.mode.suggestions_enabled:
-                s = chat_after_scan(scan_ok, self.mode.suggestions_enabled)
-                if s:
-                    existing = self.context.get("user_suggestions", "")
-                    self.context["user_suggestions"] = (existing + "\n" + s) if existing else s
 
         elif phase_id == "analyze":
             if self.context.get("user_suggestions"):
@@ -185,20 +184,6 @@ class SuvariOrchestrator:
             summary = self.context.get("analysis", {}).get("summary", {})
             vulnerabilities = self.context.get("analysis", {}).get("vulnerabilities", [])
             self.logger.info("phase", f"Analysis complete: {summary.get('total', 0)} findings")
-            if vulnerabilities:
-                print(f"\n  {'='*50}")
-                print(f"  FINDINGS ({len(vulnerabilities)})")
-                for i, v in enumerate(vulnerabilities, 1):
-                    show_finding(v, i)
-                print(f"  {'='*50}\n")
-            if self.mode.suggestions_enabled:
-                s = chat_before_exploit(vulnerabilities, self.mode.suggestions_enabled)
-                if s:
-                    existing = self.context.get("user_suggestions", "")
-                    self.context["user_suggestions"] = (existing + "\n" + s) if existing else s
-                if not ask_question("Proceed with exploitation?", default=True):
-                    self.logger.info("phase", "User declined exploitation")
-                    return
 
         elif phase_id == "exploit":
             self.context["exploit_results"] = self.exploiter_agent.run(self.context)
