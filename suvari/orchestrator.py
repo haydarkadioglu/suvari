@@ -38,13 +38,14 @@ class SuvariOrchestrator:
     def __init__(self, target_url: str, workspace: Workspace, provider: str = "openai",
                  model: Optional[str] = None, recon_only: bool = False, fast: bool = False,
                  verbose: bool = False, scan_mode: ScanMode = ScanMode.GUIDED,
-                 source_dir: Optional[Path] = None, server_scan: bool = False):
+                 parallel: int = 3, source_dir: Optional[Path] = None, server_scan: bool = False):
         self.target_url = target_url
         self.ws = workspace
         self.recon_only = recon_only
         self.fast = fast
         self.verbose = verbose
         self.mode = scan_mode
+        self.parallel = parallel
         self.source_dir = source_dir
         self.server_scan = server_scan
 
@@ -65,7 +66,7 @@ class SuvariOrchestrator:
         self.reporter = ReportGenerator(self.ws, self.target_url)
 
         self.context = {"target_url": target_url, "fast": fast, "source_dir": source_dir,
-                        "mode": scan_mode, "server_scan": server_scan}
+                        "mode": scan_mode, "server_scan": server_scan, "parallel": parallel}
 
     def run(self):
         """Start (or resume) the pipeline."""

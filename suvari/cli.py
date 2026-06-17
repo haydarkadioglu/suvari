@@ -60,6 +60,7 @@ def scan(
     fast: bool = typer.Option(False, "--fast", "-f", help="Fast mode (fewer tests)"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
     mode: str = typer.Option("guided", "--mode", "-M", help="Scan mode: auto / guided / interactive"),
+    parallel: int = typer.Option(3, "--parallel", "-P", help="Parallel tool count (default: 3)"),
     server: bool = typer.Option(False, "--server", "-s", help="Full server scan (SSH, FTP, SMB, DB, all ports)"),
     source: Optional[Path] = typer.Option(None, "--source", "-r", help="Source code directory (white-box mode)"),
 ):
@@ -85,6 +86,7 @@ def scan(
         fast=fast,
         verbose=verbose,
         scan_mode=scan_mode,
+        parallel=parallel,
         source_dir=source,
         server_scan=server,
     )

@@ -187,6 +187,7 @@ class ChatSession:
             fast=fast,
             verbose=False,
             scan_mode=ScanMode.GUIDED,
+            parallel=3,
             source_dir=source,
             server_scan=server,
         )
