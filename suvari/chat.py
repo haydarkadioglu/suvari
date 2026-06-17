@@ -3,6 +3,7 @@ Chat — interactive pentesting conversation.
 Like talking to a security expert. Give commands naturally.
 """
 
+import subprocess
 from typing import Optional
 from pathlib import Path
 from rich.console import Console
@@ -19,20 +20,22 @@ from .mode import ScanMode
 
 console = Console()
 
-SYSTEM_PROMPT = """You are Suvari, an AI-powered penetration testing assistant. You help users test web applications and servers for security vulnerabilities.
+SYSTEM_PROMPT = """You are Suvari, an AI-powered pentesting and CTF assistant. You help with security testing, CTF challenges, and vulnerability analysis.
 
 You have access to:
 - Scanning: full pipeline (recon -> scan -> analyze -> exploit -> report)
+- CTF analysis: binary, stego, crypto, forensics, pcap, reverse engineering
 - Tools: nmap, whatweb, nuclei, nikto, gobuster, ffuf, sqlmap, wpscan, curl, httpx
-- Modes: auto (silent), guided (ask me), interactive (chat)
+          strings, file, binwalk, exiftool, steghide, volatility, strings
+- Modes: auto, guided, interactive
 - Server mode: all ports + services
 - White-box mode: with source code
 
-When the user asks you to scan something:
-1. Acknowledge the target briefly
-2. Explain what you'll check in 1-2 sentences
-3. Wait for the scan to complete
-4. Summarize findings
+For CTF challenges:
+- Describe the challenge naturally: "I have a pcap with DNS exfiltration"
+- Suvari will find files, run tools, and analyze results
+- Works for binary, stego, crypto, forensics, web, and reverse challenges
+- If no files found, ask the user for the file path or to put it in the current directory
 
 Keep responses concise and actionable.
 Respond in the same language as the user.
@@ -117,6 +120,15 @@ class ChatSession:
             self._cmd_check(text)
             return
 
+        # CTF detection: check for CTF-related keywords
+        ctf_keywords = ["ctf", "pcap", "binary", "stego", "forensic", "crypto", "rev", "reverse",
+                        "flag", "challenge", "buffer overflow", "rop", "shellcode", "exploit",
+                        "encrypted", "encoded", "obfuscated", "dump", "memory dump",
+                        "rootme", "hackthebox", "tryhackme", "htb"]
+        if any(kw in t for kw in ctf_keywords):
+            self._handle_ctf(text)
+            return
+
         # General chat — let LLM respond
         console.print()
         try:
@@ -129,6 +141,53 @@ class ChatSession:
             self.history.append({"role": "assistant", "content": response})
         except Exception as e:
             console.print(f"[red]Error: {e}[/red]")
+
+    def _handle_ctf(self, text: str):
+        """Handle CTF challenge descriptions naturally."""
+        console.print("[dim]CTF challenge detected. Analyzing...[/dim]")
+
+        # Step 1: Find relevant files in current directory
+        cwd = Path.cwd()
+        all_files = list(cwd.iterdir()) if cwd.exists() else []
+        files_info = []
+        for f in all_files[:30]:
+            if f.is_file() and not f.name.startswith("."):
+                size = f.stat().st_size
+                kind = self._quick_file_type(f)
+                files_info.append(f"  {f.name} ({kind}, {size}b)")
+
+        file_context = "\n".join(files_info) if files_info else "  No relevant files found in current directory."
+
+        # Step 2: Let AI analyze with file context
+        ctf_prompt = f"""The user describes a CTF challenge: "{text}"
+
+Files found in current directory:
+{file_context}
+
+Analyze what kind of CTF challenge this is and what tools to use.
+If files are relevant, describe what to do with them.
+If no files found, ask the user where the challenge file is.
+
+For each file type suggest specific commands:
+- Binary/ELF: file, strings, checksec, objdump, gdb
+- Pcap: tshark, wireshark, strings
+- Image/jpg/png: exiftool, strings, binwalk, steghide, zsteg
+- Text: file, head, cat, crypto analysis
+- Audio: strings, spectrogram analysis
+
+Respond in the same language as the user. Be concise and actionable.
+"""
+        response = self.llm.chat(messages=[{"role": "user", "content": ctf_prompt}], temperature=0.5, max_tokens=1024)
+        console.print(response)
+        self.history.append({"role": "assistant", "content": response})
+
+    def _quick_file_type(self, fpath: Path) -> str:
+        """Quick file type detection."""
+        try:
+            result = subprocess.run(["file", "-b", str(fpath)], capture_output=True, text=True, timeout=5)
+            return result.stdout.strip()[:60] if result.stdout else "unknown"
+        except Exception:
+            return "unknown"
 
     def _cmd_scan(self, text: str):
         """Parse and run a scan from chat input."""
