@@ -62,7 +62,7 @@ def scan(
     mode: str = typer.Option("guided", "--mode", "-M", help="Scan mode: auto / guided / interactive"),
     parallel: int = typer.Option(3, "--parallel", "-P", help="Parallel tool count"),
     login: Optional[str] = typer.Option(None, "--login", "-l", help="Login credentials: username:password"),
-    browser: str = typer.Option("chromium", "--browser", "-b", help="Browser engine: chromium / firefox / webkit"),
+    browser: str = typer.Option("auto", "--browser", "-b", help="Browser engine: auto / chromium / firefox / webkit"),
     server: bool = typer.Option(False, "--server", "-s", help="Full server scan (SSH, FTP, SMB, DB, all ports)"),
     source: Optional[Path] = typer.Option(None, "--source", "-r", help="Source code directory (white-box mode)"),
 ):

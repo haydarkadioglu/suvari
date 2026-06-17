@@ -37,11 +37,9 @@ class BrowserAgent:
     Supports chromium, firefox, and webkit (playwright).
     """
 
-    def __init__(self, headless: bool = True, timeout: int = 15000, browser_type: str = "chromium"):
+    def __init__(self, headless: bool = True, timeout: int = 15000, browser_type: str = "auto"):
         if not HAS_PLAYWRIGHT:
             raise RuntimeError("Playwright not installed. Run: pip install playwright && python3 -m playwright install")
-        if browser_type not in ("chromium", "firefox", "webkit"):
-            browser_type = "chromium"
         self.headless = headless
         self.timeout = timeout
         self.browser_type = browser_type
@@ -50,15 +48,39 @@ class BrowserAgent:
         self._context = None
         self._page = None
 
+    def _detect_available(self) -> str:
+        """Auto-detect which browser engine is available on the system."""
+        if self.browser_type != "auto":
+            return self.browser_type
+        import shutil
+        # Check system browsers in preference order
+        if shutil.which("firefox") or shutil.which("firefox-esr"):
+            return "firefox"
+        if shutil.which("chromium") or shutil.which("chromium-browser") or shutil.which("google-chrome"):
+            return "chromium"
+        if shutil.which("webkit2gtk-4.0") or shutil.which("safari"):
+            return "webkit"
+        # Fallback: try playwright's bundled browsers
+        for engine in ("firefox", "chromium", "webkit"):
+            try:
+                import os
+                cache = Path.home() / ".cache" / "ms-playwright"
+                if any(cache.glob(f"{engine}-*")):
+                    return engine
+            except Exception:
+                continue
+        return "chromium"  # last resort
+
     def start(self):
-        """Launch browser (chromium, firefox, or webkit)."""
+        """Launch browser (auto-detect or specified engine)."""
+        engine = self._detect_available()
         self._playwright = sync_playwright().start()
         browser_map = {
             "chromium": self._playwright.chromium,
             "firefox": self._playwright.firefox,
             "webkit": self._playwright.webkit,
         }
-        browser_engine = browser_map.get(self.browser_type, self._playwright.chromium)
+        browser_engine = browser_map.get(engine, self._playwright.chromium)
         self._browser = browser_engine.launch(headless=self.headless)
         self._context = self._browser.new_context(
             viewport={"width": 1280, "height": 720},
