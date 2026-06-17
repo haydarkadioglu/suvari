@@ -25,7 +25,7 @@ python suvari.py scan https://example.com
 
 ## Documentation
 
-Full documentation: [DOCS.md](DOCS.md)
+Documentation: [docs/index.md](docs/index.md) — installation, commands, MCP setup, architecture.
 
 ## Commands
 
