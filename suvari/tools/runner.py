@@ -20,10 +20,10 @@ def clean_ansi(text: str) -> str:
 
 
 class ToolRunner:
-    """Execute security tools with result caching."""
+    """Execute security tools with result caching (max 100 entries)."""
 
-    # Cache: (cmd_key, target) -> output
     _cache = {}
+    _MAX_CACHE = 100
 
     def __init__(self, verbose: bool = False):
         self.verbose = verbose
@@ -37,9 +37,11 @@ class ToolRunner:
                 print(f"  [cache] reused: {' '.join(cmd)[:80]}")
             return self._cache[cache_key]
 
+        # Evict oldest if cache is full
+        if len(self._cache) >= self._MAX_CACHE:
+            self._cache.pop(next(iter(self._cache)))
         if self.verbose:
             print(f"  [exec] {' '.join(cmd)[:120]}")
-
         try:
             result = subprocess.run(
                 cmd,

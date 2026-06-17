@@ -219,7 +219,7 @@ class ScanChain:
                 node.add_child(n)
 
     def _ai_decide(self) -> dict:
-        """Ask AI what to do next based on current state."""
+        """Ask AI what to do next. Robust parsing: tries JSON first, then keyword fallback."""
         state_text = self._build_state()
         avail = self.tools.available_tools()
         prompt = CHAIN_SYSTEM_PROMPT.format(
@@ -228,11 +228,49 @@ class ScanChain:
         )
 
         try:
-            decision = self.llm.chat_json(
+            # Step 1: Try to get plain text response
+            raw = self.llm.chat(
                 messages=[{"role": "user", "content": prompt}],
-                temperature=0.3,
+                temperature=0.3, max_tokens=512,
             )
+
+            # Step 2: Try JSON parsing
+            text = raw.strip()
+            if text.startswith("```"):
+                text = text.split("\n", 1)[1] if "\n" in text else text[3:]
+            if text.endswith("```"):
+                text = text[:-3].strip()
+            if text.startswith("json"):
+                text = text[4:].strip()
+
+            try:
+                return json.loads(text)
+            except json.JSONDecodeError:
+                pass
+
+            # Step 3: Keyword-based fallback
+            text_lower = text.lower()
+            decision = {"action": "continue", "reason": raw[:100]}
+
+            # Check for stop signals
+            if any(w in text_lower for w in ["stop", "done", "complete", "finished", "no more"]):
+                decision["action"] = "stop"
+                return decision
+
+            # Extract tool name
+            for tool_name in avail:
+                if tool_name in text_lower:
+                    decision["tool"] = tool_name
+                    decision["action"] = "continue"
+                    # Extract target if mentioned
+                    if "target" in text_lower or "on " in text_lower:
+                        decision["target"] = self.url
+                    return decision
+
+            # If we get here with no tool, stop
+            decision["action"] = "stop"
             return decision
+
         except Exception as e:
             return {"action": "stop", "reason": f"AI error: {e}"}
 
