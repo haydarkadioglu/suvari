@@ -1,10 +1,11 @@
 """
 Recon Agent — gathers information about the target.
-Shows real-time tool execution with elapsed time.
+Parallel execution for speed, shows real-time elapsed time.
 """
 
 import time
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from urllib.parse import urlparse, urlunparse
 from .base import BaseAgent, fmt_time
 
@@ -17,7 +18,6 @@ def clean_url(url: str) -> str:
     return url
 
 
-# Key source files to read in white-box mode
 SOURCE_FILES = [
     "package.json", "requirements.txt", "Pipfile", "Gemfile",
     "composer.json", "go.mod", "Cargo.toml",
@@ -29,7 +29,7 @@ SOURCE_FILES = [
 
 
 class ReconAgent(BaseAgent):
-    """Gathers target information: technology, ports, headers, source code."""
+    """Gathers target information in parallel: technology, ports, headers, source code."""
 
     def run(self, context: dict) -> dict:
         url = clean_url(context["target_url"])
@@ -38,87 +38,82 @@ class ReconAgent(BaseAgent):
         results = {}
         total_start = time.time()
 
-        # 1. whatweb — technology fingerprinting
-        if self.tools.check_tool("whatweb"):
-            self.log(f"  whatweb — Technology fingerprinting")
-            t0 = time.time()
-            output = self.tools.run(["whatweb", "-v", url], timeout=60)
-            self.log(f"     [+] whatweb done in {fmt_time(time.time() - t0)}")
-            self.ws.save_result("recon", "whatweb", output)
-            results["whatweb"] = output
-        else:
-            results["whatweb"] = "(whatweb not installed)"
+        # Run independent tasks in parallel
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            futures = {}
 
-        # 2. curl — response headers
-        self.log(f"  curl — HTTP header analysis")
-        t0 = time.time()
-        headers = self.tools.run(
-            ["curl", "-sI", "-L", url, "--max-time", "15"], timeout=20
-        )
-        self.log(f"     [+] curl done in {fmt_time(time.time() - t0)}")
-        self.ws.save_result("recon", "headers", headers)
-        results["headers"] = headers
-
-        # 3. nmap — port scan
-        if self.tools.check_tool("nmap"):
-            host = url.split("://")[-1].split("/")[0]
-            is_server = context.get("server_scan", False)
-            if is_server:
-                self.log(f"  nmap — Full port scan + service detection")
-                t0 = time.time()
-                nmap = self.tools.run(
-                    ["nmap", "-sV", "-p-", "--open", host], timeout=300
-                )
+            # 1. whatweb
+            if self.tools.check_tool("whatweb"):
+                futures[executor.submit(self.tools.run, ["whatweb", url], 30)] = "whatweb"
             else:
-                self.log(f"  nmap — Quick port scan")
-                t0 = time.time()
-                nmap = self.tools.run(
-                    ["nmap", "-T4", "-F", "--open", host], timeout=120
+                results["whatweb"] = "(not installed)"
+
+            # 2. curl headers
+            futures[executor.submit(self.tools.run, ["curl", "-sI", "-L", url, "--max-time", "10"], 15)] = "headers"
+
+            # 3. nmap
+            if self.tools.check_tool("nmap"):
+                host = url.split("://")[-1].split("/")[0]
+                is_server = context.get("server_scan", False)
+                if is_server:
+                    nmap_cmd = ["nmap", "-sV", "--top-ports", "1000", "--open", host]
+                    futures[executor.submit(self.tools.run, nmap_cmd, 180)] = "nmap"
+                else:
+                    nmap_cmd = ["nmap", "-T4", "-F", "--open", host]
+                    futures[executor.submit(self.tools.run, nmap_cmd, 60)] = "nmap"
+            else:
+                results["nmap"] = "(not installed)"
+
+            # 4. robots.txt + common paths (combined curl check)
+            futures[executor.submit(self.tools.run, ["curl", "-sL", f"{url.rstrip('/')}/robots.txt", "--max-time", "8"], 12)] = "robots"
+
+            # Collect results as they complete
+            for fut in as_completed(futures):
+                name = futures[fut]
+                t1 = time.time()
+                try:
+                    output = fut.result()
+                except Exception as e:
+                    output = f"(error: {e})"
+                elapsed = fmt_time(time.time() - t1)
+
+                if name == "whatweb":
+                    self.log(f"  whatweb done in {elapsed}")
+                elif name == "headers":
+                    self.log(f"  headers done in {elapsed}")
+                elif name == "nmap":
+                    self.log(f"  nmap done in {elapsed}")
+                elif name == "robots":
+                    self.log(f"  robots done in {elapsed}")
+
+                self.ws.save_result("recon", name, output)
+                results[name] = output
+
+            # 5. Common paths (sequential, fast)
+            t0 = time.time()
+            common_paths = ["/.git/config", "/.env", "/sitemap.xml", "/crossdomain.xml"]
+            findings = []
+            for path in common_paths:
+                out = self.tools.run(
+                    ["curl", "-sI", "-o", "/dev/null", "-w", "%{http_code}",
+                     f"{url.rstrip('/')}{path}", "--max-time", "4"], timeout=8
                 )
-            self.log(f"     [+] nmap done in {fmt_time(time.time() - t0)}")
-            self.ws.save_result("recon", "nmap", nmap)
-            results["nmap"] = nmap
-        else:
-            results["nmap"] = "(nmap not installed)"
-
-        # 4. robots.txt check
-        self.log(f"  curl — robots.txt check")
-        t0 = time.time()
-        robots = self.tools.run(
-            ["curl", "-sL", f"{url.rstrip('/')}/robots.txt", "--max-time", "10"], timeout=15
-        )
-        self.log(f"     [+] robots.txt done in {fmt_time(time.time() - t0)}")
-        self.ws.save_result("recon", "robots", robots)
-        results["robots"] = robots
-
-        # 5. common paths check
-        self.log(f"  curl — Common path check")
-        t0 = time.time()
-        common_paths = ["/.git/config", "/.env", "/sitemap.xml", "/crossdomain.xml"]
-        findings = []
-        for path in common_paths:
-            out = self.tools.run(
-                ["curl", "-sI", "-o", "/dev/null", "-w", "%{http_code}",
-                 f"{url.rstrip('/')}{path}", "--max-time", "5"], timeout=10
-            )
-            if out.strip() not in ("404", "301", "302", "403", "(error)", "(empty)"):
-                findings.append(f"{path}: {out.strip()}")
-        common_result = "\n".join(findings) if findings else "No exposed files found"
-        self.log(f"     [+] common path check done in {fmt_time(time.time() - t0)}")
-        self.ws.save_result("recon", "common_paths", common_result)
-        results["common_paths"] = common_result
+                if out.strip() not in ("404", "301", "302", "403", "(error)", "(empty)"):
+                    findings.append(f"{path}: {out.strip()}")
+            results["common_paths"] = "\n".join(findings) if findings else "No exposed files found"
+            self.log(f"  path check done in {fmt_time(time.time() - t0)}")
 
         # 6. White-box: read source code if available
         source_dir = context.get("source_dir")
         if source_dir:
-            self.log(f"  source — Reading source code: {source_dir}")
+            self.log(f"  source — Reading: {source_dir}")
             t0 = time.time()
             source_info = self._read_source_code(Path(source_dir))
             if source_info:
                 self.ws.save_result("recon", "source_analysis", source_info)
                 results["source_analysis"] = source_info
                 lines = source_info.count("\n")
-                self.log(f"     [+] Source analysis done in {fmt_time(time.time() - t0)} ({lines} lines)")
+                self.log(f"  source done in {fmt_time(time.time() - t0)} ({lines} lines)")
 
         total = fmt_time(time.time() - total_start)
         self.log(f"Recon complete in {total}")
@@ -127,31 +122,22 @@ class ReconAgent(BaseAgent):
         return results
 
     def _read_source_code(self, source_dir: Path) -> str:
-        """Read key source files for white-box analysis."""
         if not source_dir.exists():
-            self.log(f"     Source directory not found: {source_dir}")
             return ""
-
-        parts = []
-        parts.append(f"=== Source: {source_dir} ===\n")
-
+        parts = [f"=== Source: {source_dir} ===\n"]
         for pattern in SOURCE_FILES:
-            matches = list(source_dir.rglob(pattern))
-            for fpath in matches[:5]:  # Max 5 matches per pattern
+            for fpath in list(source_dir.rglob(pattern))[:5]:
                 try:
                     if fpath.is_dir():
-                        # List directory contents
                         files = [p.name for p in fpath.iterdir() if p.is_file()][:15]
                         parts.append(f"--- {fpath.relative_to(source_dir)}/ ---")
                         parts.extend(f"  {f}" for f in files)
                     else:
-                        # Read small files (< 50KB)
                         size = fpath.stat().st_size
                         if size < 50_000:
                             content = fpath.read_text(errors="replace")
                             parts.append(f"--- {fpath.relative_to(source_dir)} ({size}b) ---")
-                            parts.append(content[:2000])  # Limit per file
-                except Exception as e:
-                    parts.append(f"--- {fpath.relative_to(source_dir)}: error: {e} ---")
-
+                            parts.append(content[:2000])
+                except Exception:
+                    pass
         return "\n".join(parts)

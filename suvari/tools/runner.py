@@ -20,15 +20,25 @@ def clean_ansi(text: str) -> str:
 
 
 class ToolRunner:
-    """Execute security tools and collect output."""
+    """Execute security tools with result caching."""
+
+    # Cache: (cmd_key, target) -> output
+    _cache = {}
 
     def __init__(self, verbose: bool = False):
         self.verbose = verbose
 
     def run(self, cmd: list, timeout: int = 120, workdir: Optional[Path] = None) -> str:
-        """Run a command, return stdout+stderr."""
+        """Run a command with caching. Same cmd+target -> cached result."""
+        # Create cache key from command and working directory
+        cache_key = (tuple(cmd), str(workdir))
+        if cache_key in self._cache:
+            if self.verbose:
+                print(f"  [cache] reused: {' '.join(cmd)[:80]}")
+            return self._cache[cache_key]
+
         if self.verbose:
-            print(f"  ⚡ {' '.join(cmd)}")
+            print(f"  [exec] {' '.join(cmd)[:120]}")
 
         try:
             result = subprocess.run(
@@ -39,13 +49,17 @@ class ToolRunner:
                 cwd=workdir,
             )
             output = clean_ansi(result.stdout + result.stderr)
+            self._cache[cache_key] = output
             return output.strip() if output else "(empty)"
         except subprocess.TimeoutExpired:
-            return f"(TIMEOUT after {timeout}s)"
+            self._cache[cache_key] = f"(TIMEOUT after {timeout}s)"
+            return self._cache[cache_key]
         except FileNotFoundError:
-            return f"(tool not found: {cmd[0]})"
+            self._cache[cache_key] = f"(tool not found: {cmd[0]})"
+            return self._cache[cache_key]
         except Exception as e:
-            return f"(error: {e})"
+            self._cache[cache_key] = f"(error: {e})"
+            return self._cache[cache_key]
 
     def check_tool(self, name: str) -> bool:
         """Check if a tool is installed."""
