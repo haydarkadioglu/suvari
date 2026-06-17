@@ -246,7 +246,12 @@ class ScanChain:
                 text = text.strip("'\n ")  # Remove stray quotes/newlines
 
             try:
-                return json.loads(text)
+                parsed = json.loads(text)
+                if isinstance(parsed, dict):
+                    return parsed
+                # If it's just a string, convert to action
+                if isinstance(parsed, str) and parsed.lower() in ("stop", "done", "continue"):
+                    return {"action": parsed.lower(), "reason": raw[:100]}
             except json.JSONDecodeError:
                 pass
 

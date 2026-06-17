@@ -86,16 +86,6 @@ class ReconAgent(BaseAgent):
                     output = f"(error: {e})"
                 elapsed = fmt_time(time.time() - submit_time)
                 self.log(f"  {name} done in {elapsed}")
-
-                if name == "whatweb":
-                    self.log(f"  whatweb done in {elapsed}")
-                elif name == "headers":
-                    self.log(f"  headers done in {elapsed}")
-                elif name == "nmap":
-                    self.log(f"  nmap done in {elapsed}")
-                elif name == "robots":
-                    self.log(f"  robots done in {elapsed}")
-
                 self.ws.save_result("recon", name, output)
                 results[name] = output
 
