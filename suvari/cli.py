@@ -11,6 +11,7 @@ from .orchestrator import SuvariOrchestrator
 from .workspace import Workspace
 from .config import configure_interactive, load_config
 from .mode import ScanMode
+from .chat import ChatSession
 
 console = Console()
 app = typer.Typer(
@@ -141,3 +142,11 @@ def list():
             report_file = d / "report.md"
             status = "✅" if report_file.exists() else "🔄"
             console.print(f"  {status} {d.name}")
+
+
+@app.command()
+def chat():
+    """💬 Interactive pentesting chat — talk to Suvari naturally"""
+    banner()
+    session = ChatSession()
+    session.run()
