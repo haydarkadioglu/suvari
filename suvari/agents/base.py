@@ -4,9 +4,17 @@ Inspired by LuaN1aoAgent's P-E-R (Planner-Executor-Reflector) framework.
 """
 
 from typing import Optional
+from datetime import timedelta
 from ..llm import LLMClient
 from ..workspace import Workspace
 from ..tools.runner import ToolRunner
+
+
+def fmt_time(seconds: float) -> str:
+    """Format elapsed time: sub-second shows '0.Xs', else 'M:SS'."""
+    if seconds < 1:
+        return f"{seconds:.1f}s"
+    return str(timedelta(seconds=int(seconds)))
 
 
 class BaseAgent:
@@ -27,12 +35,9 @@ class BaseAgent:
         self.verbose = verbose
 
     def log(self, msg: str):
-        if self.verbose or msg.startswith("  🛠️") or msg.startswith("     ✅") or msg.startswith("  ⏭️") or msg.startswith("✅"):
+        """Show log messages. Tool operations always visible."""
+        if self.verbose or msg.startswith(("  🛠️", "     ✅", "✅", "  ⏭️", "  ⚠️", "🔍", "🌐", "🧠")):
             print(f"  {msg}")
-
-    def status(self, msg: str):
-        """Always show status messages (tool starts/completions)."""
-        print(f"  {msg}")
 
     def run(self, context: dict) -> dict:
         raise NotImplementedError

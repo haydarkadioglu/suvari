@@ -4,8 +4,7 @@ Inspired by Shannon's vulnerability analysis pipeline.
 """
 
 import time
-from datetime import timedelta
-from .base import BaseAgent
+from .base import BaseAgent, fmt_time
 from ..prompt_loader import PromptLoader
 
 
@@ -47,7 +46,7 @@ class AnalyzerAgent(BaseAgent):
                 messages=[{"role": "user", "content": system_prompt}],
                 temperature=0.1,
             )
-            elapsed = str(timedelta(seconds=int(time.time() - t0)))
+            elapsed = fmt_time(time.time() - t0)
             self.ws.save_json("analysis", "findings", analysis)
             summary = analysis.get("summary", {})
             self.log(f"     ✅ Analysis done in {elapsed} — {summary.get('total', 0)} findings")

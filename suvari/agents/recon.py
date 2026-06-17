@@ -4,8 +4,7 @@ Shows real-time tool execution with elapsed time.
 """
 
 import time
-from datetime import timedelta
-from .base import BaseAgent
+from .base import BaseAgent, fmt_time
 
 
 class ReconAgent(BaseAgent):
@@ -23,8 +22,7 @@ class ReconAgent(BaseAgent):
             self.log(f"  🛠️  whatweb — Technology fingerprinting")
             t0 = time.time()
             output = self.tools.run(["whatweb", "-v", url], timeout=60)
-            t = str(timedelta(seconds=int(time.time() - t0)))
-            self.log(f"     ✅ whatweb done in {t}")
+            self.log(f"     ✅ whatweb done in {fmt_time(time.time() - t0)}")
             self.ws.save_result("recon", "whatweb", output)
             results["whatweb"] = output
         else:
@@ -36,8 +34,7 @@ class ReconAgent(BaseAgent):
         headers = self.tools.run(
             ["curl", "-sI", "-L", url, "--max-time", "15"], timeout=20
         )
-        t = str(timedelta(seconds=int(time.time() - t0)))
-        self.log(f"     ✅ curl done in {t}")
+        self.log(f"     ✅ curl done in {fmt_time(time.time() - t0)}")
         self.ws.save_result("recon", "headers", headers)
         results["headers"] = headers
 
@@ -49,8 +46,7 @@ class ReconAgent(BaseAgent):
             nmap = self.tools.run(
                 ["nmap", "-T4", "-F", "--open", host], timeout=120
             )
-            t = str(timedelta(seconds=int(time.time() - t0)))
-            self.log(f"     ✅ nmap done in {t}")
+            self.log(f"     ✅ nmap done in {fmt_time(time.time() - t0)}")
             self.ws.save_result("recon", "nmap", nmap)
             results["nmap"] = nmap
         else:
@@ -62,8 +58,7 @@ class ReconAgent(BaseAgent):
         robots = self.tools.run(
             ["curl", "-sL", f"{url.rstrip('/')}/robots.txt", "--max-time", "10"], timeout=15
         )
-        t = str(timedelta(seconds=int(time.time() - t0)))
-        self.log(f"     ✅ robots.txt done in {t}")
+        self.log(f"     ✅ robots.txt done in {fmt_time(time.time() - t0)}")
         self.ws.save_result("recon", "robots", robots)
         results["robots"] = robots
 
@@ -79,13 +74,12 @@ class ReconAgent(BaseAgent):
             )
             if out.strip() not in ("404", "301", "302", "403", "(error)", "(empty)"):
                 findings.append(f"{path}: {out.strip()}")
-        t = str(timedelta(seconds=int(time.time() - t0)))
         common_result = "\n".join(findings) if findings else "No exposed files found"
-        self.log(f"     ✅ common path check done in {t}")
+        self.log(f"     ✅ common path check done in {fmt_time(time.time() - t0)}")
         self.ws.save_result("recon", "common_paths", common_result)
         results["common_paths"] = common_result
 
-        total = str(timedelta(seconds=int(time.time() - total_start)))
+        total = fmt_time(time.time() - total_start)
         self.log(f"✅ Recon complete in {total}")
         results["_recon_time"] = total
         return results
