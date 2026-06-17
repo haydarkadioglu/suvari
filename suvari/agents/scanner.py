@@ -34,6 +34,7 @@ class ScannerAgent(BaseAgent):
         fast = context.get("fast", False)
         mode = context.get("mode", ScanMode.GUIDED)
         user_suggestions = context.get("user_suggestions", "")
+        server_scan = context.get("server_scan", False)
 
         self.log(f" Scanning: {url}")
 
@@ -47,7 +48,7 @@ class ScannerAgent(BaseAgent):
 
         # AI picks the tools
         loader = PromptLoader(url, fast)
-        prompt_ctx = {"recon_data": recon_text[:4000], "available_tools": avail}
+        prompt_ctx = {"recon_data": recon_text[:4000], "available_tools": avail, "server_scan": server_scan}
         if user_suggestions:
             prompt_ctx["user_suggestions"] = user_suggestions
         prompt = loader.render_with_shared("scanner", **prompt_ctx)

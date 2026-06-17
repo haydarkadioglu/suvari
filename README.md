@@ -1,34 +1,48 @@
 # Suvari 🐎
 
-AI-powered black-box web pentester. Give the URL, Suvari handles the rest.
+AI-powered black-box web + server pentester. Give the URL, Suvari handles the rest.
 
 ## Features
 
-- **Black-box** — no source code needed, just a URL
-- **AI-powered** — LLM (OpenAI/Anthropic/DeepSeek/Gemini/OpenRouter/Ollama) drives intelligent analysis
+- **Black-box** — no source code needed, just a URL or IP
+- **Server scan** (`-s`) — full port scan + service detection, checks SSH/FTP/SMB/DB
+- **AI-driven** — LLM (OpenAI/Anthropic/DeepSeek/Gemini/OpenRouter/Ollama) plans tool selection
+- **Interactive guidance** — user can give hints during scan ("check /api", "try SQLi on login")
 - **No Docker required** — uses existing Kali tools directly
 - **Multi-phase pipeline**: Recon → Scan → AI Analysis → Exploit → Report
-- **Resumable** — partial outputs remain in the workspace directory
-- **Interactive config** — `python suvari.py configure` sets everything up
+- **Resumable** — partial outputs remain, continue from where you left off
+- **3 scan modes**: auto, guided (default), interactive
+- **White-box mode** (`-r`) — include source code in analysis
 
 ## Quick Start
 
 ```bash
-# Install dependencies
 pip install -r requirements.txt
+python suvari.py configure          # One-time setup (provider + API key)
 
-# Interactive setup (provider + API key)
-python suvari.py configure
-
-# Run a scan
+# Web app scan
 python suvari.py scan https://example.com
 
-# Fast mode (fewer tests)
+# Full server scan (all ports + services)
+python suvari.py scan https://server.com -s
+
+# Interactive mode (ask before each tool)
+python suvari.py scan https://example.com -M interactive
+
+# Fast mode
 python suvari.py scan https://example.com --fast
 
-# Specific provider
-python suvari.py scan https://example.com -p deepseek -m deepseek-chat
+# White-box mode (with source code)
+python suvari.py scan https://example.com -r /path/to/source
 ```
+
+## Scan Modes
+
+| Mode | Flag | Behavior |
+|------|------|----------|
+| **Guided** (default) | *(none)* | Asks for suggestions, OK for slow tools, shows findings live |
+| **Auto** | `-M auto` | Fully automated, no questions, minimal output. CI/CD ready |
+| **Interactive** | `-M interactive` | Asks before EVERY tool, full user control |
 
 ## Configuration
 
@@ -36,38 +50,20 @@ python suvari.py scan https://example.com -p deepseek -m deepseek-chat
 python suvari.py configure
 ```
 
-This interactive wizard lets you pick:
+Supported providers: OpenAI, Anthropic (Claude), DeepSeek, Google Gemini, OpenRouter, Ollama (local).
 
-| # | Provider | API Key Env |
-|---|----------|-------------|
-| 1 | OpenAI | `OPENAI_API_KEY` |
-| 2 | Anthropic (Claude) | `ANTHROPIC_API_KEY` |
-| 3 | DeepSeek | `DEEPSEEK_API_KEY` |
-| 4 | Google Gemini | `GEMINI_API_KEY` |
-| 5 | OpenRouter | `OPENROUTER_API_KEY` |
-| 6 | Ollama (local) | none needed |
+Config saved to `~/.config/suvari/`.
 
-Config is saved to `~/.config/suvari/` — after that, just run `scan` without flags.
+## Example Scan
 
-## Output
+```bash
+# Web server
+python suvari.py scan https://juice-shop.herokuapp.com
 
-```
-output/
-└── 20250220_143020_example_com/
-    ├── meta.json
-    ├── recon/
-    │   ├── whatweb.txt
-    │   ├── headers.txt
-    │   ├── nmap.txt
-    │   └── robots.txt
-    ├── scans/
-    │   ├── nuclei.txt
-    │   └── nikto.txt
-    ├── analysis/
-    │   └── findings.json
-    ├── exploit/
-    │   └── results.json
-    └── report.md
+# During scan, user can suggest:
+# → check /api for IDOR
+# → try SQL injection on search
+# → look for JWT tokens
 ```
 
 ## Architecture
@@ -76,20 +72,31 @@ output/
 suvari/
 ├── suvari.py               # Entry point
 ├── suvari/
-│   ├── cli.py              # Typer CLI (scan/recon/report/list/configure)
+│   ├── cli.py              # Typer CLI
 │   ├── llm.py              # Multi-provider LLM client
-│   ├── config.py           # Interactive configuration wizard
-│   ├── workspace.py        # Output directory management
+│   ├── config.py           # Interactive config wizard
 │   ├── orchestrator.py     # Pipeline controller
+│   ├── core.py             # P-E-R framework (Planner, Reflector)
+│   ├── state.py            # Checkpoint/resume
+│   ├── knowledge.py        # Knowledge graph + failure attribution
+│   ├── prompt_loader.py    # Jinja2 prompt loader
+│   ├── scan_logger.py      # File logging
+│   ├── mode.py             # Scan modes + suggestion system
 │   ├── report.py           # Markdown report generator
+│   ├── workspace.py        # Output directory management
 │   ├── agents/
-│   │   ├── base.py         # Abstract base agent
-│   │   ├── recon.py        # Reconnaissance (whatweb, nmap, curl)
-│   │   ├── scanner.py      # Vulnerability scanning (AI-driven tool selection)
-│   │   ├── analyzer.py     # AI analysis (LLM-powered findings)
-│   │   └── exploiter.py    # Proof-of-concept exploitation (sqlmap, curl)
-│   └── tools/
-│       └── runner.py       # Kali tool subprocess wrapper
+│   │   ├── recon.py        # Reconnaissance
+│   │   ├── scanner.py      # AI-driven tool selection
+│   │   ├── analyzer.py     # LLM vulnerability analysis
+│   │   └── exploiter.py    # Proof-of-concept exploits
+│   ├── tools/
+│   │   └── runner.py       # Kali tool subprocess wrapper
+│   └── prompts/            # Shannon-inspired prompt templates
+│       ├── shared/
+│       ├── recon/
+│       ├── scanner/
+│       ├── analyzer/
+│       └── exploiter/
 └── requirements.txt
 ```
 

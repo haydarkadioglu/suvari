@@ -59,6 +59,7 @@ def scan(
     fast: bool = typer.Option(False, "--fast", "-f", help="Fast mode (fewer tests)"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
     mode: str = typer.Option("guided", "--mode", "-M", help="Scan mode: auto / guided / interactive"),
+    server: bool = typer.Option(False, "--server", "-s", help="Full server scan (SSH, FTP, SMB, DB, all ports)"),
     source: Optional[Path] = typer.Option(None, "--source", "-r", help="Source code directory (white-box mode)"),
 ):
     """🔍 Scan target URL — recon → vulnerability scan → analysis → report"""
@@ -71,6 +72,8 @@ def scan(
     console.print(f"[bold]⚙️  Mode:[/bold] {scan_mode}")
     if source:
         console.print(f"[bold]📁 Source:[/bold] {source} (white-box mode)")
+    if server:
+        console.print(f"[bold]🖥️  Mode:[/bold] Server scan (all ports + services)")
     console.print(f"[bold]📁 Output:[/bold] {ws.path}\n")
     orchestrator = SuvariOrchestrator(
         target_url=url,
@@ -82,6 +85,7 @@ def scan(
         verbose=verbose,
         scan_mode=scan_mode,
         source_dir=source,
+        server_scan=server,
     )
     orchestrator.run()
 

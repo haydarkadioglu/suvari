@@ -25,8 +25,22 @@ Prioritize tools and arguments that address these areas.
 {% endif %}
 
 <mode>
-{% if fast %}FAST MODE — Choose only 2-3 fastest, highest-impact tools.{% else %}FULL MODE — Be thorough.{% endif %}
+{% if fast %}FAST MODE — Choose only 2-3 fastest, highest-impact tools.{% elif server_scan %}SERVER MODE — Full infrastructure scan. Check ALL services: web (80/443), SSH (22), FTP (21), SMB (445), databases (3306/5432/27017), RDP (3389), etc. Use nmap full port scan + service detection.{% else %}FULL MODE — Be thorough.{% endif %}
 </mode>
+
+{% if server_scan %}
+<server_target>
+This is a full server scan. The target may have multiple services running.
+Check for:
+- SSH: weak ciphers, default creds, outdated OpenSSH versions
+- FTP: anonymous access enabled
+- SMB: SMBv1 enabled, EternalBlue vulnerability
+- Databases: MySQL/PostgreSQL/MongoDB exposed to internet
+- Mail: SMTP open relay, POP3/IMAP
+- RDP: weak creds, BlueKeep vulnerability (CVE-2019-0708)
+- All open ports: check with nmap -sV for service versions
+</server_target>
+{% endif %}
 
 <tool_reference>
 ### Tool Capabilities & When To Use

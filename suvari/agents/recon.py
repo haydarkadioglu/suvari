@@ -48,14 +48,22 @@ class ReconAgent(BaseAgent):
         self.ws.save_result("recon", "headers", headers)
         results["headers"] = headers
 
-        # 3. nmap — quick port scan
+        # 3. nmap — port scan
         if self.tools.check_tool("nmap"):
-            self.log(f"  🛠️  nmap — Quick port scan")
             host = url.split("://")[-1].split("/")[0]
-            t0 = time.time()
-            nmap = self.tools.run(
-                ["nmap", "-T4", "-F", "--open", host], timeout=120
-            )
+            is_server = context.get("server_scan", False)
+            if is_server:
+                self.log(f"  🛠️  nmap — Full port scan + service detection")
+                t0 = time.time()
+                nmap = self.tools.run(
+                    ["nmap", "-sV", "-p-", "--open", host], timeout=300
+                )
+            else:
+                self.log(f"  🛠️  nmap — Quick port scan")
+                t0 = time.time()
+                nmap = self.tools.run(
+                    ["nmap", "-T4", "-F", "--open", host], timeout=120
+                )
             self.log(f"     ✅ nmap done in {fmt_time(time.time() - t0)}")
             self.ws.save_result("recon", "nmap", nmap)
             results["nmap"] = nmap
