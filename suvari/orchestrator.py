@@ -182,31 +182,69 @@ class SuvariOrchestrator:
             self.logger.info("phase", "Recon complete")
 
         elif phase_id == "scan":
-            # Browser-based analysis first (if login provided)
+            # Browser-based analysis (always runs)
             browser_findings = []
-            if self.login_creds:
-                console.print("  Browser: Login + DOM XSS scan")
-                try:
-                    from .browser import BrowserAgent
-                    creds = self.login_creds.split(":", 1)
-                    with BrowserAgent() as browser:
-                        # Login
-                        login_result = browser.login_form(self.target_url, creds[0], creds[1])
-                        if login_result.get("success"):
-                            console.print(f"  Login OK -> {login_result.get('final_url', '?')}")
-                            # DOM XSS check
-                            dom_xss = browser.check_dom_xss(self.target_url)
-                            if dom_xss:
-                                browser_findings = dom_xss
-                                console.print(f"  DOM XSS: {len(dom_xss)} findings")
-                            # Screenshot
-                            ss = browser.screenshot(str(self.ws.path / "browser_login.png"))
-                            if ss:
-                                console.print(f"  Screenshot saved")
+            console.print("  Browser: Dynamic page analysis + DOM XSS")
+            try:
+                from .browser import BrowserAgent
+                with BrowserAgent() as browser:
+                    # 1. Navigate to target
+                    page_info = browser.navigate(self.target_url)
+                    if page_info.get("status", 0) in (200, 301, 302, 403):
+                        console.print(f"  Page: {page_info.get('title', '?')} ({page_info.get('status', '?')})")
+                        if page_info.get("client_tech"):
+                            console.print(f"  Client tech: {', '.join(page_info['client_tech'])}")
+
+                        # 2. Check for login forms
+                        forms = page_info.get("forms", [])
+                        login_form = any("password" in str(f) for f in forms)
+                        if login_form:
+                            console.print(f"  Login form detected ({len(forms)} forms)")
+
+                            # 3. Try default credentials
+                            defaults = self._try_default_logins(browser)
+                            if defaults:
+                                console.print(f"  Default login worked: {defaults}")
+                            else:
+                                # 4. Use provided credentials if any
+                                if self.login_creds:
+                                    creds = self.login_creds.split(":", 1)
+                                    login_result = browser.login_form(self.target_url, creds[0], creds[1])
+                                    if login_result.get("success"):
+                                        console.print(f"  Login OK -> {login_result.get('final_url', '?')}")
+                                    else:
+                                        console.print(f"  Login failed")
                         else:
-                            console.print(f"  Login failed: {login_result.get('error', 'unknown')}")
-                except Exception as e:
-                    console.print(f"  Browser error: {e}")
+                            console.print(f"  No login form detected ({len(forms)} forms)")
+
+                        # 5. DOM XSS check (always)
+                        dom_xss = browser.check_dom_xss(self.target_url)
+                        if dom_xss:
+                            browser_findings = dom_xss
+                            console.print(f"  DOM XSS: {len(dom_xss)} findings")
+
+                        # 6. Screenshot
+                        ss = browser.screenshot(str(self.ws.path / "browser_screenshot.png"))
+                        if ss:
+                            console.print(f"  Screenshot saved")
+
+                        # Store for analyzer
+                        self.context["browser_info"] = {
+                            "title": page_info.get("title", ""),
+                            "status": page_info.get("status", 0),
+                            "tech": page_info.get("client_tech", []),
+                            "forms": len(forms),
+                            "scripts": len(page_info.get("scripts", [])),
+                            "dom_xss": browser_findings,
+                            "login_worked": self.login_creds is not None,
+                        }
+                    else:
+                        console.print(f"  Page error: {page_info.get('error', 'unknown')}")
+
+            except ImportError:
+                console.print("  Browser: Playwright not installed. Install: pip install playwright")
+            except Exception as e:
+                console.print(f"  Browser error: {e}")
 
             # Tree chain scan
             if self.chain_mode:
@@ -254,3 +292,19 @@ class SuvariOrchestrator:
             report = self.reporter.generate(self.context)
             console.print(f"\nReport generated ({len(report)} chars)")
             self.logger.info("phase", "Report generated")
+
+    def _try_default_logins(self, browser) -> Optional[str]:
+        """Try default credentials on login forms."""
+        defaults = [
+            ("admin", "admin"), ("admin", "password"), ("admin", "admin123"),
+            ("admin", "123456"), ("root", "root"), ("test", "test"),
+            ("user", "user"), ("guest", "guest"),
+        ]
+        for username, password in defaults:
+            try:
+                result = browser.login_form(self.target_url, username, password)
+                if result.get("success"):
+                    return f"{username}:{password}"
+            except Exception:
+                continue
+        return None
