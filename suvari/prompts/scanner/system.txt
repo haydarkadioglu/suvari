@@ -16,7 +16,7 @@ URL: {{ target_url }}
 {% endfor %}
 </available_tools>
 
-{% if user_suggestions %}
+{% if user_suggestions is defined and user_suggestions %}
 <user_suggestions>
 The user specifically wants you to check these:
 {{ user_suggestions }}

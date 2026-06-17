@@ -4,7 +4,6 @@ AI analyzes recon data and decides which tools to run.
 """
 
 import time
-import sys
 from urllib.parse import urlparse, urlunparse
 from .base import BaseAgent, fmt_time
 from ..prompt_loader import PromptLoader
@@ -91,12 +90,7 @@ class ScannerAgent(BaseAgent):
             reason = item.get("reason", "")
             max_time = self.TOOL_MAX_TIMES.get(tool_name, 60)
 
-            cmd = self._build_cmd(tool_name, args, url)
-            if not cmd:
-                self.log(f"  Unknown tool: {tool_name}, skipping")
-                continue
-
-            # In interactive mode: ask before each tool
+            # Interactive/guided mode questions
             if mode == ScanMode.INTERACTIVE:
                 self.log(f"  {tool_name} — {reason[:80]}")
                 ans = input(f"     Run {tool_name}? [Y/n] ").strip().lower()
@@ -107,7 +101,6 @@ class ScannerAgent(BaseAgent):
                     results[f"{tool_name}_status"] = "SKIPPED"
                     continue
             elif max_time > 30 and mode.suggestions_enabled:
-                # In guided: ask only for slow tools
                 self.log(f"  {tool_name} — {reason[:80]}")
                 self.log(f"     (estimated: up to {max_time}s)")
                 if not ask_user(f"Run {tool_name} (~{max_time}s)?", default=False):
@@ -116,6 +109,19 @@ class ScannerAgent(BaseAgent):
                     results[f"{tool_name}_time"] = "skipped"
                     results[f"{tool_name}_status"] = "SKIPPED"
                     continue
+
+            # Build command with tool name FIRST
+            cmd = [tool_name] + args
+            if tool_name in ("nuclei", "gobuster", "ffuf", "sqlmap"):
+                cmd += ["-u", url]
+            elif tool_name in ("nikto", "curl"):
+                cmd += [url]
+            elif tool_name == "wpscan":
+                cmd += ["--url", url]
+            elif tool_name == "httpx":
+                cmd = [tool_name, "-u", url]
+            elif tool_name == "nmap":
+                cmd += [url.split("://")[-1].split("/")[0]]
 
             # Execute
             self.log(f"  {tool_name} — {reason[:80]}")
@@ -127,13 +133,13 @@ class ScannerAgent(BaseAgent):
             if "TIMEOUT" in output:
                 status = "TIMEOUT"
             elif output.startswith("("):
-                status = f"ERROR:{output[1:20]}"
+                status = f"ERROR:{output[1:25]}"
             else:
                 status = "OK"
 
-            out_preview = output[:80].replace("\n", " ").strip()
             self.log(f"     [{status}] {tool_name} ({elapsed_str})")
             if status != "OK":
+                out_preview = output[:100].replace("\n", " ").strip()
                 self.log(f"     -> {out_preview}")
 
             self.ws.save_result("scans", tool_name, output)
@@ -145,18 +151,3 @@ class ScannerAgent(BaseAgent):
         self.log(f"Scan complete in {total_time}")
         results["_total_time"] = total_time
         return results
-
-    def _build_cmd(self, tool_name: str, args: list, url: str):
-        builders = {
-            "nuclei": lambda: args + ["-u", url],
-            "nikto": lambda: args + [url],
-            "gobuster": lambda: args + ["-u", url],
-            "ffuf": lambda: args + ["-u", url],
-            "sqlmap": lambda: args + ["-u", url],
-            "wpscan": lambda: args + ["--url", url],
-            "httpx": lambda: args + ["-u", url],
-            "curl": lambda: args + [url],
-            "nmap": lambda: args + [url.split("://")[-1].split("/")[0]],
-        }
-        builder = builders.get(tool_name)
-        return builder() if builder else args + [url]

@@ -4,6 +4,7 @@ Inspired by Shannon's multi-agent pipeline + LuaN1aoAgent's P-E-R framework.
 """
 
 from typing import Optional
+from pathlib import Path
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from .llm import LLMClient

@@ -13,7 +13,7 @@ URL: {{ target_url }}
 ## Scan Results
 {{ scan_data }}
 
-{% if analysis_context %}
+{% if analysis_context is defined and analysis_context %}
 ## User Focus Areas
 {{ analysis_context }}
 {% endif %}
