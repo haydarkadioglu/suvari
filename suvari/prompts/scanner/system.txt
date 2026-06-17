@@ -16,6 +16,14 @@ URL: {{ target_url }}
 {% endfor %}
 </available_tools>
 
+{% if user_suggestions %}
+<user_suggestions>
+The user specifically wants you to check these:
+{{ user_suggestions }}
+Prioritize tools and arguments that address these areas.
+</user_suggestions>
+{% endif %}
+
 <mode>
 {% if fast %}FAST MODE — Choose only 2-3 fastest, highest-impact tools.{% else %}FULL MODE — Be thorough.{% endif %}
 </mode>

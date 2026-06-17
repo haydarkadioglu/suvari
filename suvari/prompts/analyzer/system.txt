@@ -12,6 +12,11 @@ URL: {{ target_url }}
 
 ## Scan Results
 {{ scan_data }}
+
+{% if analysis_context %}
+## User Focus Areas
+{{ analysis_context }}
+{% endif %}
 </evidence>
 
 <analysis_framework>

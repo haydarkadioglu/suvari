@@ -33,10 +33,13 @@ class AnalyzerAgent(BaseAgent):
 
         # Load prompt from file
         loader = PromptLoader(url, fast)
-        system_prompt = loader.render_with_shared("analyzer",
-            recon_data=recon_text[:4000],
-            scan_data=scan_text[:8000],
-        )
+        prompt_ctx = {
+            "recon_data": recon_text[:4000],
+            "scan_data": scan_text[:8000],
+        }
+        if context.get("analysis_context"):
+            prompt_ctx["analysis_context"] = context["analysis_context"]
+        system_prompt = loader.render_with_shared("analyzer", **prompt_ctx)
 
         self.log("  🛠️  LLM — AI vulnerability analysis")
         t0 = time.time()

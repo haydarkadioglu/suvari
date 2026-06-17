@@ -33,6 +33,7 @@ class ScannerAgent(BaseAgent):
         recon_results = context.get("recon_results", {})
         fast = context.get("fast", False)
         mode = context.get("mode", ScanMode.GUIDED)
+        user_suggestions = context.get("user_suggestions", "")
 
         self.log(f" Scanning: {url}")
 
@@ -46,8 +47,10 @@ class ScannerAgent(BaseAgent):
 
         # AI picks the tools
         loader = PromptLoader(url, fast)
-        prompt = loader.render_with_shared("scanner",
-            recon_data=recon_text[:4000], available_tools=avail)
+        prompt_ctx = {"recon_data": recon_text[:4000], "available_tools": avail}
+        if user_suggestions:
+            prompt_ctx["user_suggestions"] = user_suggestions
+        prompt = loader.render_with_shared("scanner", **prompt_ctx)
 
         self.log(f"  AI planning tool selection...")
         t0 = time.time()
@@ -92,24 +95,23 @@ class ScannerAgent(BaseAgent):
                 self.log(f"  Unknown tool: {tool_name}, skipping")
                 continue
 
-            # Ask user based on mode
+            # In interactive mode: ask before each tool
             if mode == ScanMode.INTERACTIVE:
-                # In interactive mode, ask before EVERY tool
                 self.log(f"  {tool_name} — {reason[:80]}")
                 ans = input(f"     Run {tool_name}? [Y/n] ").strip().lower()
                 if ans in ("n", "no"):
-                    self.log(f"     Skipped (user declined)")
-                    results[tool_name] = "(skipped by user)"
+                    self.log(f"     Skipped")
+                    results[tool_name] = "(skipped)"
                     results[f"{tool_name}_time"] = "skipped"
                     results[f"{tool_name}_status"] = "SKIPPED"
                     continue
-            elif max_time > 30 and mode.ask_if_slow:
-                # In guided mode: ask only for slow tools
+            elif max_time > 30 and mode.suggestions_enabled:
+                # In guided: ask only for slow tools
                 self.log(f"  {tool_name} — {reason[:80]}")
                 self.log(f"     (estimated: up to {max_time}s)")
-                if not ask_user(f"Run {tool_name} (takes ~{max_time}s)?", default=False):
-                    self.log(f"     Skipped (user declined)")
-                    results[tool_name] = "(skipped by user)"
+                if not ask_user(f"Run {tool_name} (~{max_time}s)?", default=False):
+                    self.log(f"     Skipped")
+                    results[tool_name] = "(skipped)"
                     results[f"{tool_name}_time"] = "skipped"
                     results[f"{tool_name}_status"] = "SKIPPED"
                     continue

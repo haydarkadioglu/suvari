@@ -18,7 +18,7 @@ from .state import PipelineState
 from .core import Planner, Reflector
 from .prompt_loader import PromptLoader
 from .scan_logger import ScanLogger
-from .mode import ScanMode, ask_user, show_finding
+from .mode import ScanMode, ask_user, show_finding, ask_suggestions, show_recon_summary
 
 console = Console()
 
@@ -200,6 +200,17 @@ class SuvariOrchestrator:
             self.context["recon_results"] = self.recon_agent.run(self.context)
             self.logger.info("phase", "Recon complete")
 
+            # Ask user for suggestions (guided/interactive mode)
+            if self.mode.suggestions_enabled:
+                show_recon_summary(self.context.get("recon_results", {}))
+                suggestion = ask_suggestions(
+                    "Any areas to focus on?",
+                    "e.g.: check /api, try SQL injection on login, look for JWT tokens"
+                )
+                if suggestion:
+                    self.context["user_suggestions"] = suggestion
+                    self.logger.info("phase", f"User suggestion: {suggestion}")
+
         elif phase_id == "scan":
             self.context["scan_results"] = self.scanner_agent.run(self.context)
             scan_ok = self.context.get("scan_results", {})
@@ -207,26 +218,37 @@ class SuvariOrchestrator:
             self.logger.info("phase", f"Scan complete: {tools_run}")
 
         elif phase_id == "analyze":
+            # Include user suggestions in analysis context
+            if self.context.get("user_suggestions"):
+                self.context["analysis_context"] = f"User specifically asked to check: {self.context['user_suggestions']}"
+
             self.context["analysis"] = self.analyzer_agent.run(self.context)
             summary = self.context.get("analysis", {}).get("summary", {})
             vulnerabilities = self.context.get("analysis", {}).get("vulnerabilities", [])
             self.logger.info("phase", f"Analysis complete: {summary.get('total', 0)} findings")
 
-            # Show live findings in interactive/guided mode
-            if self.mode.show_live_findings and vulnerabilities:
+            # Show live findings
+            if vulnerabilities:
                 print(f"\n  {'='*50}")
-                print(f"  📋 LIVE FINDINGS ({len(vulnerabilities)})")
+                print(f"  📋 FINDINGS ({len(vulnerabilities)})")
                 for v in vulnerabilities:
                     show_finding(v)
                 print(f"  {'='*50}\n")
 
-                # Ask before exploit in interactive mode
-                if self.mode.ask_before_exploit:
-                    if ask_user("Proceed with exploitation?", default=True):
-                        self.logger.info("phase", "User approved exploitation")
-                    else:
-                        self.logger.info("phase", "User declined exploitation")
-                        return  # Skip exploit phase
+            # Ask user for suggestions after analysis
+            if self.mode.suggestions_enabled:
+                suggestion = ask_suggestions(
+                    "Any specific exploit to try?",
+                    "e.g.: try sqlmap on the search endpoint, check if admin:admin works"
+                )
+                if suggestion:
+                    self.context["user_suggestions"] = (self.context.get("user_suggestions", "")
+                                                        + "\n" + suggestion)
+                    self.logger.info("phase", f"User exploit suggestion: {suggestion}")
+
+                if not ask_user("Proceed with exploitation?", default=True):
+                    self.logger.info("phase", "User declined exploitation")
+                    return
 
         elif phase_id == "exploit":
             self.context["exploit_results"] = self.exploiter_agent.run(self.context)
