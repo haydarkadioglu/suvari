@@ -60,8 +60,7 @@ def scan(
     fast: bool = typer.Option(False, "--fast", "-f", help="Fast mode (fewer tests)"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
     mode: str = typer.Option("guided", "--mode", "-M", help="Scan mode: auto / guided / interactive"),
-    parallel: int = typer.Option(3, "--parallel", "-P", help="Parallel tool count (default: 3)"),
-    chain: bool = typer.Option(False, "--chain", "-c", help="Tree-based recursive scanning (AI decides next steps)"),
+    parallel: int = typer.Option(3, "--parallel", "-P", help="Parallel tool count"),
     server: bool = typer.Option(False, "--server", "-s", help="Full server scan (SSH, FTP, SMB, DB, all ports)"),
     source: Optional[Path] = typer.Option(None, "--source", "-r", help="Source code directory (white-box mode)"),
 ):
@@ -88,7 +87,7 @@ def scan(
         verbose=verbose,
         scan_mode=scan_mode,
         parallel=parallel,
-        chain_mode=chain,
+        chain_mode=True,  # Tree-based scanning is default
         source_dir=source,
         server_scan=server,
     )

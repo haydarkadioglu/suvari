@@ -1,129 +1,66 @@
-# Suvari 🐎
+# Suvari
 
-AI-powered black-box web + server pentester. Chat with it, scan with it, hack with it.
-
-## Features
-
-- **💬 Chat mode** — `python suvari.py chat` opens an interactive pentesting conversation. Talk naturally: "scan this", "check /api", "try SQL injection"
-- **🖥️ Server scan** (`-s`) — full port scan + service detection, checks SSH/FTP/SMB/DB
-- **🤖 AI-driven** — LLM (OpenAI/Anthropic/DeepSeek/Gemini/OpenRouter/Ollama) plans tool selection
-- **💡 Interactive guidance** — give hints during scan: "check /api for IDOR", "look for JWT tokens"
-- **🐳 No Docker required** — uses existing Kali tools directly
-- **📋 Multi-phase pipeline**: Recon → Scan → AI Analysis → Exploit → Report
-- **🔄 Resumable** — partial outputs remain, continue from where you left off
-- **⚙️ 3 scan modes**: auto, guided (default), interactive
-- **📁 White-box mode** (`-r`) — include source code in analysis
-- **📝 Scan logging** — every scan writes structured logs to `scan.log`
+AI-powered black-box web + server pentester with MCP support.
 
 ## Quick Start
 
 ```bash
 pip install -r requirements.txt
-python suvari.py configure          # One-time setup (provider + API key)
-
-# 💬 Chat mode (interactive conversation)
-python suvari.py chat
-
-# 🌐 Web app scan
+python suvari.py configure          # One-time setup
 python suvari.py scan https://example.com
-
-# 🖥️ Full server scan (all ports + services)
-python suvari.py scan https://server.com -s
-
-# 📁 White-box mode (with source code)
-python suvari.py scan https://example.com -r /path/to/source
-
-# ⚡ Fast mode
-python suvari.py scan https://example.com --fast
 ```
 
-## 💬 Chat Mode
+## Features
 
-The chat mode lets you interact with Suvari like a security expert:
+- **Tree-based scanning** — AI decides next steps, drills deeper on findings, fallback tools on failure
+- **27+ Kali tools** — nmap, nuclei, gobuster, ffuf, sqlmap, hydra, enum4linux, etc.
+- **Multi-LLM** — OpenAI, Anthropic, DeepSeek, Gemini, OpenRouter, Ollama
+- **Server scan** (`-s`) — full port scan + service detection, SSH/FTP/SMB/DB checks
+- **White-box** (`-r`) — source code analysis alongside live testing
+- **Chat mode** — interactive conversation + CTF challenge solving
+- **MCP server** — compatible with Claude Desktop, Cursor, VS Code Copilot
+- **Failure recovery** — L0-L5 failure attribution, automatic tool fallbacks
+- **Bug bounty workflow** — subdomain/URL/parameter discovery
+- **No Docker required** — uses existing Kali tools directly
+
+## Documentation
+
+Full documentation: [DOCS.md](DOCS.md)
+
+## Commands
 
 ```
-$ python suvari.py chat
-
-You > scan https://juice-shop.herokuapp.com
-  🔍 Scanning... found 5 vulnerabilities!
-  🔥 [CRITICAL] SQL Injection — /rest/products/search?q=
-  ⚠️ [HIGH] IDOR — /api/users
-
-You > check /api/users on that
-  Checking /api/users...
-
-You > what else should I look for?
-  (Suvari suggests next steps based on context)
-
-You > exit
+configure   Interactive setup
+scan        Full scan (tree-based, default mode)
+recon       Quick reconnaissance
+attack      Exploit previous scan findings
+bb          Bug bounty workflow
+chat        Interactive chat + CTF
+report      Show previous report
+list        List past scans
 ```
 
-## Scan Modes
-
-| Mode | Flag | Behavior |
-|------|------|----------|
-| **Guided** (default) | *(none)* | Asks for suggestions, OK for slow tools, shows findings live |
-| **Auto** | `-M auto` | Fully automated, no questions, minimal output. CI/CD ready |
-| **Interactive** | `-M interactive` | Chat-like, asks before each tool, full user control |
-
-## Example Chat Session
+## MCP Server
 
 ```bash
-python suvari.py chat
-
-# Inside chat:
-scan https://example.com --fast
-scan https://example.com -s          # server scan
-scan https://example.com -r ./src    # white-box
-recon https://example.com            # recon only
-check /api                           # quick endpoint check
-report                               # show last report
-history                              # list past scans
-help                                 # show commands
+python suvari_mcp.py
 ```
 
-## Configuration
-
-```bash
-python suvari.py configure
-```
-
-Supported providers: OpenAI, Anthropic (Claude), **DeepSeek**, Google Gemini, OpenRouter, Ollama (local).
-
-Config saved to `~/.config/suvari/`.
+Exposes 6 tools for Claude Desktop, Cursor, Copilot: scan_target, recon_target, run_tool, list_available_tools, get_scan_report, analyze_ctf.
 
 ## Architecture
 
 ```
 suvari/
-├── suvari.py               # Entry point
+├── suvari.py               # CLI
+├── suvari_mcp.py           # MCP server
 ├── suvari/
-│   ├── cli.py              # Typer CLI (scan, recon, chat, configure, report, list)
-│   ├── chat.py             # Interactive chat session
-│   ├── llm.py              # Multi-provider LLM client
-│   ├── config.py           # Interactive config wizard
-│   ├── orchestrator.py     # Pipeline controller
-│   ├── core.py             # P-E-R framework (Planner, Reflector)
-│   ├── state.py            # Checkpoint/resume
-│   ├── knowledge.py        # Knowledge graph + failure attribution
-│   ├── prompt_loader.py    # Jinja2 prompt loader
-│   ├── scan_logger.py      # File logging
-│   ├── mode.py             # Scan modes + suggestion system
-│   ├── report.py           # Markdown report generator
-│   ├── workspace.py        # Output directory management
-│   ├── agents/
-│   │   ├── recon.py        # Reconnaissance
-│   │   ├── scanner.py      # AI-driven tool selection
-│   │   ├── analyzer.py     # LLM vulnerability analysis
-│   │   └── exploiter.py    # Proof-of-concept exploits
-│   ├── tools/
-│   │   └── runner.py       # Kali tool subprocess wrapper
-│   └── prompts/            # Shannon-inspired prompt templates
-│       ├── shared/
-│       ├── recon/
-│       ├── scanner/
-│       ├── analyzer/
-│       └── exploiter/
+│   ├── cli.py / chat.py / mcp_server.py
+│   ├── llm.py / orchestrator.py / chain.py
+│   ├── failure.py / knowledge.py / state.py
+│   ├── agents/ (recon, scanner, analyzer, exploiter, bugbounty)
+│   ├── tools/runner.py     # Subprocess + caching
+│   └── prompts/            # Jinja2 templates
 └── requirements.txt
 ```
 
