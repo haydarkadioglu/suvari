@@ -16,14 +16,14 @@ from .chat import ChatSession
 console = Console()
 app = typer.Typer(
     name="suvari",
-    help="🐎 Suvari — AI-Powered Black-Box Web Pentester",
+    help="[SUVARI] Suvari — AI-Powered Black-Box Web Pentester",
     no_args_is_help=True,
 )
 
 
 def banner():
     console.print(Panel.fit(
-        "[bold yellow]🐎 Suvari[/bold yellow] — AI Cavalry\n"
+        "[bold yellow][SUVARI][/bold yellow] — AI Cavalry\n"
         "[dim]Black-Box Web Pentester | Give the URL, Suvari handles the rest[/dim]",
         border_style="yellow"
     ))
@@ -44,7 +44,7 @@ def _resolve_provider(provider: str, model: Optional[str]) -> tuple:
 
 @app.command()
 def configure():
-    """⚙️  Interactive setup — provider, model, API key"""
+    """Interactive setup — provider, model, API key"""
     banner()
     configure_interactive()
 
@@ -61,22 +61,23 @@ def scan(
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
     mode: str = typer.Option("guided", "--mode", "-M", help="Scan mode: auto / guided / interactive"),
     parallel: int = typer.Option(3, "--parallel", "-P", help="Parallel tool count (default: 3)"),
+    chain: bool = typer.Option(False, "--chain", "-c", help="Tree-based recursive scanning (AI decides next steps)"),
     server: bool = typer.Option(False, "--server", "-s", help="Full server scan (SSH, FTP, SMB, DB, all ports)"),
     source: Optional[Path] = typer.Option(None, "--source", "-r", help="Source code directory (white-box mode)"),
 ):
-    """🔍 Scan target URL — recon → vulnerability scan → analysis → report"""
+    """Scan target URL — recon → vulnerability scan → analysis → report"""
     banner()
     provider, model = _resolve_provider(provider, model)
     scan_mode = ScanMode.from_str(mode)
     ws = Workspace(name or url, output)
-    console.print(f"[bold]🎯 Target:[/bold] {url}")
-    console.print(f"[bold]🤖 Model:[/bold] {provider}/{model or 'default'}")
-    console.print(f"[bold]⚙️  Mode:[/bold] {scan_mode}")
+    console.print(f"[bold][TGT] Target:[/bold] {url}")
+    console.print(f"[bold][AI] Model:[/bold] {provider}/{model or 'default'}")
+    console.print(f"[bold][MODE]  Mode:[/bold] {scan_mode}")
     if source:
-        console.print(f"[bold]📁 Source:[/bold] {source} (white-box mode)")
+        console.print(f"[bold][DIR] Source:[/bold] {source} (white-box mode)")
     if server:
-        console.print(f"[bold]🖥️  Mode:[/bold] Server scan (all ports + services)")
-    console.print(f"[bold]📁 Output:[/bold] {ws.path}\n")
+        console.print(f"[bold][SRV]  Mode:[/bold] Server scan (all ports + services)")
+    console.print(f"[bold][DIR] Output:[/bold] {ws.path}\n")
     orchestrator = SuvariOrchestrator(
         target_url=url,
         workspace=ws,
@@ -87,6 +88,7 @@ def scan(
         verbose=verbose,
         scan_mode=scan_mode,
         parallel=parallel,
+        chain_mode=chain,
         source_dir=source,
         server_scan=server,
     )
@@ -101,11 +103,11 @@ def recon(
     output: Optional[Path] = typer.Option(None, "--output", "-o"),
     verbose: bool = typer.Option(False, "--verbose", "-v"),
 ):
-    """🌐 Reconnaissance only (quick)"""
+    """Reconnaissance only (quick)"""
     banner()
     provider, model = _resolve_provider(provider, model)
     ws = Workspace(f"recon-{url}", output)
-    console.print(f"[bold]🎯 Target:[/bold] {url}")
+    console.print(f"[bold][TGT] Target:[/bold] {url}")
     orchestrator = SuvariOrchestrator(
         target_url=url,
         workspace=ws,
@@ -121,19 +123,19 @@ def recon(
 def report(
     path: Path = typer.Argument(..., help="Scan output directory"),
 ):
-    """📄 Show report from a previous scan"""
+    """Show report from a previous scan"""
     banner()
     report_path = path / "report.md"
     if not report_path.exists():
-        console.print("[red]❌ report.md not found in that directory[/red]")
+        console.print("[red][ERR] report.md not found in that directory[/red]")
         raise typer.Exit(1)
-    console.print(f"[bold]📄 Report:[/bold] {report_path}")
+    console.print(f"[bold][DOC] Report:[/bold] {report_path}")
     console.print(report_path.read_text())
 
 
 @app.command()
 def list():
-    """📋 List previous scans"""
+    """List previous scans"""
     banner()
     output_dir = Path("output")
     if not output_dir.exists():
@@ -142,13 +144,13 @@ def list():
     for d in sorted(output_dir.iterdir()):
         if d.is_dir():
             report_file = d / "report.md"
-            status = "✅" if report_file.exists() else "🔄"
+            status = "[OK]" if report_file.exists() else "[RESUME]"
             console.print(f"  {status} {d.name}")
 
 
 @app.command()
 def chat():
-    """💬 Interactive pentesting chat — talk to Suvari naturally"""
+    """Interactive pentesting chat — talk to Suvari naturally"""
     banner()
     session = ChatSession()
     session.run()
@@ -159,9 +161,9 @@ def bb(
     url: str = typer.Argument(..., help="Target URL (e.g. https://example.com)"),
     output: Optional[Path] = typer.Option(None, "--output", "-o", help="Output directory"),
 ):
-    """🎯 Bug bounty recon — subdomains, URLs, params, tech"""
+    """Bug bounty recon — subdomains, URLs, params, tech"""
     banner()
-    console.print(f"[bold]🎯 Target:[/bold] {url}")
+    console.print(f"[bold][TGT] Target:[/bold] {url}")
     from .agents.bugbounty import BugBountyAgent
     from .llm import LLMClient
     from .workspace import Workspace
@@ -178,3 +180,60 @@ def bb(
     console.print(f"  Params: {len(results.get('params', []))}")
     console.print(f"  Tech: {len(results.get('technology', []))}")
     console.print(f"[dim]Output: {ws.path}[/dim]")
+
+
+@app.command()
+def attack(
+    scan_dir: Path = typer.Argument(..., help="Scan output directory (from previous scan)"),
+    provider: str = typer.Option("openai", "--provider", "-p", help="LLM provider"),
+    model: Optional[str] = None,
+):
+    """Targeted exploitation based on previous scan findings"""
+    banner()
+    from .agents.exploiter import ExploiterAgent
+    from .llm import LLMClient
+    from .workspace import Workspace
+    from .tools.runner import ToolRunner
+    from .report import ReportGenerator
+
+    # Read findings from scan output
+    findings_file = scan_dir / "analysis" / "findings.json"
+    if not findings_file.exists():
+        # Try report.md
+        report_file = scan_dir / "report.md"
+        if report_file.exists():
+            console.print(f"[yellow]No findings.json found, using report: {report_file}[/yellow]")
+            report_text = report_file.read_text()
+            findings = {"vulnerabilities": [], "summary": {"total": 0}}
+        else:
+            console.print("[red]No scan output found in that directory[/red]")
+            raise typer.Exit(1)
+    else:
+        import json
+        findings = json.loads(findings_file.read_text())
+
+    vulns = findings.get("vulnerabilities", [])
+    if not vulns:
+        console.print("[yellow]No vulnerabilities found in scan results. Nothing to attack.[/yellow]")
+        return
+
+    console.print(f"[bold]Targeted attack on {len(vulns)} findings...[/bold]")
+    for v in vulns:
+        console.print(f"  [{v.get('severity','?')}] {v.get('type','?')} — {v.get('location','')}")
+
+    # Run exploitation
+    cfg = load_config()
+    prov, mod = _resolve_provider(provider, model)
+    llm = LLMClient(provider=prov, model=mod)
+    ws = Workspace(f"attack-{scan_dir.name}")
+    tr = ToolRunner()
+    agent = ExploiterAgent("exploiter", llm, ws, tr)
+
+    context = {
+        "target_url": vulns[0].get("location", "").split("/")[0] if vulns else "",
+        "analysis": findings,
+        "fast": False,
+    }
+
+    results = agent.run(context)
+    console.print(f"\n[green]Attack complete.[/green] [dim]{ws.path}[/dim]")

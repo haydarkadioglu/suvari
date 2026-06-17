@@ -38,7 +38,7 @@ class ScanLogger:
             entry["data"] = clean
 
         # Console (always)
-        prefix = {"INFO": "  ℹ️", "WARN": "  ⚠️", "ERROR": "  ❌", "DEBUG": "  🔍"}.get(level, "  📝")
+        prefix = {"INFO": "  [INFO]", "WARN": "  [WARN]", "ERROR": "  [ERR]", "DEBUG": "  [SEARCH]"}.get(level, "  [LOG]")
         print(f"{prefix} [{phase}] {message}")
 
         # File

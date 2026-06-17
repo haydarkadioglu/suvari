@@ -17,7 +17,7 @@ class AnalyzerAgent(BaseAgent):
         scan_results = context.get("scan_results", {})
         fast = context.get("fast", False)
 
-        self.log("🧠 AI analyzing results...")
+        self.log("[AI] AI analyzing results...")
 
         recon_text = "\n\n".join([
             f"=== {k} ===\n{v[:2000]}"
@@ -41,7 +41,7 @@ class AnalyzerAgent(BaseAgent):
             prompt_ctx["analysis_context"] = context["analysis_context"]
         system_prompt = loader.render_with_shared("analyzer", **prompt_ctx)
 
-        self.log("  🛠️  LLM — AI vulnerability analysis")
+        self.log("  [TOOL]️  LLM — AI vulnerability analysis")
         t0 = time.time()
 
         try:
@@ -52,10 +52,10 @@ class AnalyzerAgent(BaseAgent):
             elapsed = fmt_time(time.time() - t0)
             self.ws.save_json("analysis", "findings", analysis)
             summary = analysis.get("summary", {})
-            self.log(f"     ✅ Analysis done in {elapsed} — {summary.get('total', 0)} findings")
+            self.log(f"     [OK] Analysis done in {elapsed} — {summary.get('total', 0)} findings")
             return analysis
         except Exception as e:
-            self.log(f"  ⚠️ Analysis error: {e}")
+            self.log(f"  [WARN] Analysis error: {e}")
             return {
                 "vulnerabilities": [],
                 "error": str(e),

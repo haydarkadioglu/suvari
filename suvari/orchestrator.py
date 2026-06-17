@@ -38,7 +38,8 @@ class SuvariOrchestrator:
     def __init__(self, target_url: str, workspace: Workspace, provider: str = "openai",
                  model: Optional[str] = None, recon_only: bool = False, fast: bool = False,
                  verbose: bool = False, scan_mode: ScanMode = ScanMode.GUIDED,
-                 parallel: int = 3, source_dir: Optional[Path] = None, server_scan: bool = False):
+                 parallel: int = 3, chain_mode: bool = False,
+                 source_dir: Optional[Path] = None, server_scan: bool = False):
         self.target_url = target_url
         self.ws = workspace
         self.recon_only = recon_only
@@ -46,6 +47,7 @@ class SuvariOrchestrator:
         self.verbose = verbose
         self.mode = scan_mode
         self.parallel = parallel
+        self.chain_mode = chain_mode
         self.source_dir = source_dir
         self.server_scan = server_scan
 
@@ -134,7 +136,7 @@ class SuvariOrchestrator:
                     self.state.phase_complete(phase_id)
 
                 except Exception as e:
-                    console.print(f"\n[red]❌ {phase_name} error: {e}[/red]")
+                    console.print(f"\n[red][ERR] {phase_name} error: {e}[/red]")
                     self.context["error"] = str(e)
                     self.state.set_error(str(e))
                     break
@@ -161,7 +163,7 @@ class SuvariOrchestrator:
         if summary.get("total", 0) > 0:
             console.print(f"\n[red] {summary['total']} vulnerabilities found![/red]")
             parts = []
-            for sev, icon in [("critical", "🔥"), ("high", "⚠️"), ("medium", "📌"), ("low", "ℹ️"), ("info", "ℹ️")]:
+            for sev, icon in [("critical", "[CRIT]"), ("high", "[WARN]"), ("medium", "[INFO]"), ("low", "[INFO]"), ("info", "[INFO]")]:
                 if summary.get(sev, 0) > 0:
                     parts.append(f"{icon} {sev.title()}: {summary[sev]}")
             console.print(f"  {' | '.join(parts)}")
@@ -177,7 +179,19 @@ class SuvariOrchestrator:
             self.logger.info("phase", "Recon complete")
 
         elif phase_id == "scan":
-            self.context["scan_results"] = self.scanner_agent.run(self.context)
+            if self.chain_mode:
+                from .chain import ScanChain
+                console.print("  Tree-based recursive scan chain")
+                chain = ScanChain(self.target_url, self.llm, self.tools, self.ws,
+                                  fast=self.fast, verbose=self.verbose)
+                findings = chain.run()
+                self.context["scan_chain"] = [n.to_dict() for n in chain.root.children]
+                self.context["chain_log"] = chain.chain_log
+                self.context["scan_results"] = {"chain_findings": findings,
+                                                 "_total_time": "chain"}
+                self.logger.info("phase", f"Chain scan complete: {len(findings)} leads")
+            else:
+                self.context["scan_results"] = self.scanner_agent.run(self.context)
             scan_ok = self.context.get("scan_results", {})
             tools_run = [k for k in scan_ok if not k.endswith("_time") and not k.endswith("_status") and not k.startswith("_")]
             self.logger.info("phase", f"Scan complete: {tools_run}")

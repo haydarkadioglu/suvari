@@ -8,7 +8,7 @@ from .workspace import Workspace
 from .tools.runner import clean_ansi
 
 
-REPORT_TEMPLATE = """# 🐎 Suvari Pentest Report
+REPORT_TEMPLATE = """# [SUVARI] Suvari Pentest Report
 
 **Target:** {target_url}
 **Date:** {date}
@@ -16,7 +16,7 @@ REPORT_TEMPLATE = """# 🐎 Suvari Pentest Report
 
 ---
 
-## 📊 Summary
+## [STATS] Summary
 
 | Metric | Value |
 |--------|-------|
@@ -28,7 +28,7 @@ REPORT_TEMPLATE = """# 🐎 Suvari Pentest Report
 
 ---
 
-## 🔍 Reconnaissance Results
+## [SEARCH] Reconnaissance Results
 
 ### Technology (whatweb)
 ```
@@ -47,25 +47,25 @@ REPORT_TEMPLATE = """# 🐎 Suvari Pentest Report
 
 ---
 
-## 🛡️ Scan Results
+## [SCAN]️ Scan Results
 
 {scan_results}
 
 ---
 
-## 🧠 AI Analysis
+## [AI] AI Analysis
 
 {analysis}
 
 ---
 
-## 💥 Exploitation Attempts
+## [EXP] Exploitation Attempts
 
 {exploit_results}
 
 ---
 
-## ✅ Remediation Recommendations
+## [OK] Remediation Recommendations
 
 {remediation}
 
@@ -108,7 +108,7 @@ class ReportGenerator:
         exploits = exploit_data.get("exploits", [])
         exploit_text = ""
         for e in exploits:
-            icon = "✅" if e.get("success") else "❌"
+            icon = "[OK]" if e.get("success") else "[ERR]"
             exploit_text += f"- {icon} **{e.get('vuln_type','?')}** ({e.get('tool','?')})\n"
         if not exploits:
             exploit_text = "*No exploitation attempted.*"
@@ -122,7 +122,7 @@ class ReportGenerator:
         report = REPORT_TEMPLATE.format(
             target_url=self.target_url,
             date=datetime.now().strftime("%Y-%m-%d %H:%M"),
-            status="✅ Complete" if not context.get("error") else f"❌ Error: {context.get('error')}",
+            status="[OK] Complete" if not context.get("error") else f"[ERR] Error: {context.get('error')}",
             total=summary.get("total", 0),
             critical=summary.get("critical", 0),
             high=summary.get("high", 0),

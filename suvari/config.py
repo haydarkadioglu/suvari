@@ -83,7 +83,7 @@ def save_env(key: str, value: str):
     lines = [f"{k}={v}" for k, v in env_vars.items()]
     ENV_FILE.write_text("\n".join(lines) + "\n")
     os.environ[key] = value
-    print(f"  ✅ {key} saved to {ENV_FILE}")
+    print(f"  [OK] {key} saved to {ENV_FILE}")
 
 
 def get_env(key: str) -> Optional[str]:
@@ -107,7 +107,7 @@ def configure_interactive():
     console = Console()
 
     console.print(Panel.fit(
-        "[bold yellow]🐎 Suvari Configuration[/bold yellow]\n"
+        "[bold yellow][SUVARI] Suvari Configuration[/bold yellow]\n"
         "Let's set up your provider, model, and API keys.\n"
         "[dim]Settings are saved to ~/.config/suvari/[/dim]",
         border_style="yellow",
@@ -126,7 +126,7 @@ def configure_interactive():
         models += "..." if len(info["models"]) > 3 else ""
         env = info["env_key"] or "—"
         has_key = get_env(info["env_key"]) if info["env_key"] else False
-        env_str = f"{env} ✅" if has_key else (env or "—")
+        env_str = f"{env} [OK]" if has_key else (env or "—")
         table.add_row(str(i), info["name"], models, env_str)
 
     console.print(table)
@@ -175,7 +175,7 @@ def configure_interactive():
                     password=True,
                 )
         else:
-            console.print(f"\n  [yellow]⚠️ {env_key} is not set[/yellow]")
+            console.print(f"\n  [yellow][WARN] {env_key} is not set[/yellow]")
             api_key = Prompt.ask(
                 f"[bold]{env_key}[/bold] (press Enter to skip)",
                 password=True,
@@ -193,7 +193,7 @@ def configure_interactive():
     config["model"] = model
     save_config(config)
 
-    console.print(f"\n[bold green]✅ Configuration complete![/bold green]")
+    console.print(f"\n[bold green][OK] Configuration complete![/bold green]")
     console.print(f"  Config: {CONFIG_FILE}")
     console.print(f"  Env:    {ENV_FILE}")
     console.print(f"\n[dim]Now you can simply run:[/dim]")

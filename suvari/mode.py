@@ -68,7 +68,7 @@ def chat_prompt(phase: str, summary: str, suggestions_enabled: bool = True) -> s
 def show_finding(vuln: dict, index: int = 0):
     """Display a finding."""
     sev = vuln.get("severity", "?")
-    icon = {"CRITICAL": "🔥", "HIGH": "⚠️", "MEDIUM": "📌", "LOW": "ℹ️", "INFO": "ℹ️"}.get(sev, "•")
+    icon = {"CRITICAL": "[CRIT]", "HIGH": "[WARN]", "MEDIUM": "[INFO]", "LOW": "[INFO]", "INFO": "[INFO]"}.get(sev, "•")
     print(f"  {icon} #{index} [{sev}] {vuln.get('type', '?')} — {vuln.get('location', '')}")
 
 

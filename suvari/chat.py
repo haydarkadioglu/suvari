@@ -54,7 +54,7 @@ class ChatSession:
     def run(self):
         """Start the chat loop."""
         console.print(Panel.fit(
-            "[bold yellow]🐎 Suvari Chat[/bold yellow]\n"
+            "[bold yellow][SUVARI] Suvari Chat[/bold yellow]\n"
             "[dim]AI Pentester Assistant — write naturally, I'll figure it out[/dim]",
             border_style="yellow"
         ))
@@ -204,7 +204,7 @@ class ChatSession:
             console.print(f"[bold red]Found {len(findings)} issues:[/bold red]")
             for v in findings[:5]:
                 sev = v.get("severity", "?")
-                icon = {"CRITICAL": "🔥", "HIGH": "⚠️", "MEDIUM": "📌", "LOW": "ℹ️"}.get(sev, "•")
+                icon = {"CRITICAL": "[CRIT]", "HIGH": "[WARN]", "MEDIUM": "[INFO]", "LOW": "[INFO]"}.get(sev, "•")
                 console.print(f"  {icon} [{sev}] {v.get('type','?')} — {v.get('location','')}")
             if len(findings) > 5:
                 console.print(f"  ... and {len(findings) - 5} more")
@@ -280,5 +280,5 @@ class ChatSession:
         for d in sorted(p.iterdir()):
             if d.is_dir():
                 r = d / "report.md"
-                s = "✅" if r.exists() else "🔄"
+                s = "[OK]" if r.exists() else "[RESUME]"
                 console.print(f"  {s} {d.name}")
