@@ -20,13 +20,12 @@ def clean_ansi(text: str) -> str:
 
 
 class ToolRunner:
-    """Execute security tools with result caching (max 100 entries)."""
-
-    _cache = {}
-    _MAX_CACHE = 100
+    """Execute security tools with result caching (max 100 per session)."""
 
     def __init__(self, verbose: bool = False):
         self.verbose = verbose
+        self._cache = {}  # Instance-level cache, not shared across sessions
+        self._MAX_CACHE = 100
 
     def run(self, cmd: list, timeout: int = 120, workdir: Optional[Path] = None) -> str:
         """Run a command with caching. Same cmd+target -> cached result."""

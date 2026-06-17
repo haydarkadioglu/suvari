@@ -28,6 +28,7 @@ class Workspace:
     def save_result(self, phase: str, tool: str, data: str):
         """Save a tool's output to the workspace."""
         out = self.path / phase / f"{tool}.txt"
+        out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(data)
         if phase not in [p["phase"] for p in self._meta["phases"]]:
             self._meta["phases"].append({"phase": phase, "tools": []})

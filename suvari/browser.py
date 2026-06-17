@@ -52,24 +52,29 @@ class BrowserAgent:
         """Auto-detect which browser engine is available on the system."""
         if self.browser_type != "auto":
             return self.browser_type
+
+        # Check playwright's bundled browsers first
+        cache = Path.home() / ".cache" / "ms-playwright"
+        if cache.exists():
+            for engine in ("firefox", "chromium", "webkit"):
+                try:
+                    if any(cache.glob(f"{engine}-*")) and (cache / f"{engine}-*" / engine).exists():
+                        continue
+                    if any(cache.glob(f"{engine}-*")):
+                        return engine
+                except Exception:
+                    continue
+
+        # Then check system browsers
         import shutil
-        # Check system browsers in preference order
         if shutil.which("firefox") or shutil.which("firefox-esr"):
             return "firefox"
         if shutil.which("chromium") or shutil.which("chromium-browser") or shutil.which("google-chrome"):
             return "chromium"
         if shutil.which("webkit2gtk-4.0") or shutil.which("safari"):
             return "webkit"
-        # Fallback: try playwright's bundled browsers
-        for engine in ("firefox", "chromium", "webkit"):
-            try:
-                import os
-                cache = Path.home() / ".cache" / "ms-playwright"
-                if any(cache.glob(f"{engine}-*")):
-                    return engine
-            except Exception:
-                continue
-        return "chromium"  # last resort
+
+        return "chromium"  # last resort, will give clear error
 
     def start(self):
         """Launch browser (auto-detect or specified engine)."""
