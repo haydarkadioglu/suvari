@@ -137,7 +137,10 @@ class LLMClient:
         if text.startswith("json"):
             text = text[4:].strip()
 
-        return json.loads(text)
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError as e:
+            return {"error": f"Invalid JSON response: {text[:100]}", "raw": text}
 
     # ─── OpenAI-compatible (OpenAI, DeepSeek, OpenRouter, Ollama, Gemini) ───
 
