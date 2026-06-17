@@ -17,6 +17,7 @@ from .report import ReportGenerator
 from .state import PipelineState
 from .core import Planner, Reflector
 from .prompt_loader import PromptLoader
+from .scan_logger import ScanLogger
 
 console = Console()
 
@@ -49,6 +50,8 @@ class SuvariOrchestrator:
         self.verbose = verbose
 
         self.state = PipelineState(workspace.path)
+        self.logger = ScanLogger(workspace.path)
+        self.logger.info("suvari", f"Scan started: {target_url} (provider={provider}, fast={fast})")
         self.llm = LLMClient(provider=provider, model=model)
         self.tools = ToolRunner(verbose=verbose)
         self.prompts = PromptLoader(target_url, fast)
@@ -185,16 +188,23 @@ class SuvariOrchestrator:
 
     def _run_phase(self, phase_id: str):
         """Run a single pipeline phase."""
+        self.logger.info("phase", f"Starting: {phase_id}")
 
         if phase_id == "recon":
             console.print(f"  🎯 {self.target_url}")
             self.context["recon_results"] = self.recon_agent.run(self.context)
+            self.logger.info("phase", "Recon complete")
 
         elif phase_id == "scan":
             self.context["scan_results"] = self.scanner_agent.run(self.context)
+            scan_ok = self.context.get("scan_results", {})
+            tools_run = [k for k in scan_ok if not k.endswith("_time") and not k.endswith("_status") and not k.startswith("_")]
+            self.logger.info("phase", f"Scan complete: {tools_run}")
 
         elif phase_id == "analyze":
             self.context["analysis"] = self.analyzer_agent.run(self.context)
+            summary = self.context.get("analysis", {}).get("summary", {})
+            self.logger.info("phase", f"Analysis complete: {summary.get('total', 0)} findings")
 
         elif phase_id == "exploit":
             self.context["exploit_results"] = self.exploiter_agent.run(self.context)
@@ -202,3 +212,4 @@ class SuvariOrchestrator:
         elif phase_id == "report":
             report = self.reporter.generate(self.context)
             console.print(f"\n📄 Report generated ({len(report)} chars)")
+            self.logger.info("phase", "Report generated")

@@ -39,6 +39,7 @@ class Workspace:
     def save_json(self, phase: str, name: str, data: dict):
         """Save JSON data to the workspace."""
         out = self.path / phase / f"{name}.json"
+        out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(json.dumps(data, indent=2))
 
     def get_path(self, phase: str, tool: str) -> Path:
