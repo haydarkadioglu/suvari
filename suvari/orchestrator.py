@@ -198,6 +198,7 @@ class SuvariOrchestrator:
                         # 2. Check for login forms
                         forms = page_info.get("forms", [])
                         login_form = any("password" in str(f) for f in forms)
+                        defaults = None
                         if login_form:
                             console.print(f"  Login form detected ({len(forms)} forms)")
 
@@ -238,6 +239,14 @@ class SuvariOrchestrator:
                             "dom_xss": browser_findings,
                             "login_worked": self.login_creds is not None,
                         }
+
+                        # 7. Self-registration if login form found
+                        if login_form and not defaults and not self.login_creds:
+                            console.print("  Trying self-registration...")
+                            reg_result = browser.self_register(self.target_url)
+                            if reg_result.get("success"):
+                                console.print(f"  Self-registration OK: {reg_result.get('credentials', {}).get('email','')}")
+                                self.context["browser_registration"] = reg_result.get("credentials")
                     else:
                         console.print(f"  Page error: {page_info.get('error', 'unknown')}")
 
@@ -245,6 +254,63 @@ class SuvariOrchestrator:
                 console.print("  Browser: Playwright not installed. Install: pip install playwright")
             except Exception as e:
                 console.print(f"  Browser error: {e}")
+
+            # CVE Intelligence: check detected technologies for known vulnerabilities
+            recon_results = self.context.get("recon_results", {})
+            if recon_results:
+                try:
+                    from .cve_intel import extract_versions, query_cve_api, query_searchsploit, generate_exploit
+                    tech_versions = extract_versions(recon_results)
+                    if tech_versions:
+                        cve_findings = []
+                        for tv in tech_versions[:3]:  # Top 3 techs
+                            cves = query_cve_api(tv["technology"], tv["version"])
+                            if not cves:
+                                cves = query_searchsploit(tv["technology"], tv["version"])
+                            for cve in cves[:2]:
+                                cve_findings.append({
+                                    "type": f"CVE: {cve.get('id', '?')}",
+                                    "location": f"{tv['technology']} {tv['version']}",
+                                    "severity": "CRITICAL" if str(cve.get('cvss', '0')).startswith(("9", "10")) else "HIGH",
+                                    "description": cve.get("summary", "")[:200],
+                                    "cve_id": cve.get("id", ""),
+                                    "cvss": cve.get("cvss", "N/A"),
+                                })
+                        if cve_findings:
+                            console.print(f"  CVE Intel: {len(cve_findings)} known vulnerabilities")
+                            self.context["cve_findings"] = cve_findings
+
+                            # Generate exploit for most critical
+                            top_cve = cve_findings[0]
+                            top_tech = tech_versions[0]
+                            if top_cve.get("cve_id"):
+                                exploit = generate_exploit(
+                                    top_tech["technology"], top_tech["version"],
+                                    top_cve["cve_id"], top_cve["description"],
+                                    self.llm
+                                )
+                                if exploit and not exploit.startswith("# Failed"):
+                                    exploit_path = self.ws.path / f"exploit_{top_cve['cve_id']}.py"
+                                    exploit_path.write_text(exploit)
+                                    console.print(f"  Exploit generated: {exploit_path.name}")
+                except Exception as e:
+                    console.print(f"  CVE Intel error: {e}")
+
+            # JWT Analysis: check for JWT tokens in recon results
+            all_text = str(self.context.get("recon_results", {}))
+            import re
+            jwt_pattern = r'eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+'
+            jwt_matches = re.findall(jwt_pattern, all_text)
+            if jwt_matches:
+                try:
+                    from .jwt_analysis import analyze_jwt
+                    for token in jwt_matches[:3]:
+                        analysis = analyze_jwt(token)
+                        if "findings" in analysis and analysis["findings"]:
+                            console.print(f"  JWT Analysis: {analysis['summary']}")
+                            self.context["jwt_findings"] = analysis["findings"]
+                except Exception as e:
+                    console.print(f"  JWT error: {e}")
 
             # Tree chain scan
             if self.chain_mode:

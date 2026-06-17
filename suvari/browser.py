@@ -236,3 +236,93 @@ class BrowserAgent:
 
     def __exit__(self, *args):
         self.close()
+
+    def self_register(self, url: str, email_prefix: str = "suvari_test") -> dict:
+        """Try to self-register on the target site."""
+        import random
+        import string
+
+        t0 = time.time()
+        page_info = self.navigate(url)
+        if "error" in page_info:
+            return page_info
+
+        # Look for registration forms
+        forms = page_info.get("forms", [])
+        register_forms = []
+        for f in forms:
+            form_str = str(f).lower()
+            if any(w in form_str for w in ["register", "signup", "sign-up", "create", "new account"]):
+                register_forms.append(f)
+
+        # Also look for register links/buttons
+        try:
+            reg_links = self._page.evaluate("""() => {
+                const links = document.querySelectorAll('a[href*=\"register\"], a[href*=\"signup\"], a[href*=\"sign-up\"], a[href*=\"create-account\"]');
+                return Array.from(links).map(a => a.href);
+            }""")
+            if reg_links and not register_forms:
+                # Navigate to registration page
+                self.navigate(reg_links[0])
+                forms = page_info.get("forms", [])
+                for f in forms:
+                    form_str = str(f).lower()
+                    if any(w in form_str for w in ["password", "email", "username"]):
+                        register_forms.append(f)
+        except Exception:
+            pass
+
+        if not register_forms:
+            return {"success": False, "reason": "No registration form found"}
+
+        # Generate random credentials
+        suffix = "".join(random.choices(string.ascii_lowercase + string.digits, k=6))
+        creds = {
+            "email": f"{email_prefix}_{suffix}@test.com",
+            "username": f"test_{suffix}",
+            "password": f"TestPass_{suffix}!",
+        }
+
+        try:
+            # Try filling the form
+            for form_sel in ["input[name=email]", "input[type=email]", "#email"]:
+                el = self._page.query_selector(form_sel)
+                if el:
+                    el.fill(creds["email"])
+                    break
+            for form_sel in ["input[name=username]", "input[name=user]", "#username", "#user"]:
+                el = self._page.query_selector(form_sel)
+                if el:
+                    el.fill(creds["username"])
+                    break
+            for form_sel in ["input[name=password]", "input[type=password]", "#password"]:
+                el = self._page.query_selector(form_sel)
+                if el:
+                    el.fill(creds["password"])
+                    break
+            # Confirm password if needed
+            for form_sel in ["input[name=password_confirm]", "input[name=confirm_password]", "#confirm_password"]:
+                el = self._page.query_selector(form_sel)
+                if el:
+                    el.fill(creds["password"])
+                    break
+
+            # Submit
+            for btn_sel in ["button[type=submit]", "input[type=submit]", "button:has-text('Register')",
+                            "button:has-text('Sign Up')", "button:has-text('Create')"]:
+                btn = self._page.query_selector(btn_sel)
+                if btn:
+                    btn.click()
+                    break
+
+            self._page.wait_for_load_state("networkidle", timeout=8000)
+            current_url = self._page.url
+
+            return {
+                "success": current_url != url or "error" not in self._page.content().lower(),
+                "credentials": creds,
+                "final_url": current_url,
+                "time": fmt_time(time.time() - t0),
+            }
+        except Exception as e:
+            return {"success": False, "error": str(e), "credentials": creds}
