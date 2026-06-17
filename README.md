@@ -128,23 +128,3 @@ suvari/
 ```
 
 Inspired by [Shannon](https://github.com/KeygraphHQ/shannon), [PentAGI](https://github.com/vxcontrol/pentagi), [LuaN1aoAgent](https://github.com/SanMuzZzZz/LuaN1aoAgent), and [HexStrike AI](https://github.com/0x4m4/hexstrike-ai).
-
-## Comparison
-
-| Feature | Suvari | Shannon | PentAGI | LuaN1aoAgent | HexStrike AI |
-|---------|--------|---------|---------|--------------|--------------|
-| **Language** | Python | TypeScript | Go | Python | Python |
-| **AI** | Built-in LLM | Claude SDK | OpenAI/Anthropic | LLM agents | External (MCP) |
-| **Black-box** | Yes | No (white-box) | Yes | Yes | Yes |
-| **White-box** | Yes (-r flag) | Yes | No | No | No |
-| **Server scan** | Yes (-s flag) | No | Yes | No | Yes |
-| **Chat mode** | Yes | No | Yes (web UI) | No | No |
-| **Tool count** | 27-45 | 5 (browser only) | 20+ | 10+ | 150+ (MCP) |
-| **AI-driven tools** | Yes | Yes | Yes | Yes | No (external AI) |
-| **Parallel exec** | Yes (-P flag) | No | Yes | No | Yes |
-| **Tree/chain scan** | Yes (-c flag) | No | No | Yes (causal graph) | Yes (attack chain) |
-| **Resume** | Yes | Yes | Yes | No | No |
-| **Docker** | No (optional) | Yes (required) | Yes (required) | No | No |
-| **Bug bounty** | Yes (bb command) | No | No | No | Yes (workflows) |
-| **MCP support** | No | No | No | No | Yes (native) |
-| **License** | MIT | AGPL-3.0 | AGPL-3.0 | Apache-2.0 | MIT |
