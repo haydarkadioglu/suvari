@@ -1,96 +1,91 @@
 """
-Scanner Agent — vulnerability scanning.
-AI decides which tools to run based on recon results.
-Inspired by Shannon's multi-agent approach.
+Scanner Agent — vulnerability scanning with smart tool selection.
+Uses rule-based tech detection to pick the best tools, shows real-time progress.
 """
 
+import time
+from datetime import timedelta
 from .base import BaseAgent
-from ..prompt_loader import PromptLoader
+from ..scanner_selector import select_tools, detect_tech_from_recon
 
 
 class ScannerAgent(BaseAgent):
-    """Vulnerability scanning — AI chooses which tools to run."""
+    """Vulnerability scanning — smart tool selection based on target tech."""
 
     def run(self, context: dict) -> dict:
         url = context["target_url"]
-        recon_data = context.get("recon_results", {})
+        recon_results = context.get("recon_results", {})
         fast = context.get("fast", False)
 
-        self.log(f"🔍 Scanning starting: {url}")
-
-        # Combine recon results
-        recon_text = "\n\n".join([
-            f"=== {k} ===\n{v[:2000]}"
-            for k, v in recon_data.items()
-            if isinstance(v, str) and v and not v.startswith("(")
-        ])
-
+        self.log(f"🔍 Scanning: {url}")
         avail = self.tools.available_tools()
 
-        # Load prompt from file
-        loader = PromptLoader(url, fast)
-        system_prompt = loader.render_with_shared("scanner",
-            recon_data=recon_text[:3000],
-            available_tools=avail,
+        # Smart tool selection (no AI call needed — rule-based)
+        tool_plan = select_tools(
+            available=avail,
+            recon_results=recon_results,
+            fast=fast,
+            verbose=self.verbose,
         )
 
-        # Ask AI: which scans to run?
-        self.log("  AI planning scans...")
+        if not tool_plan:
+            self.log("  ⚠️ No tools available — using nuclei as fallback")
+            if "nuclei" in avail:
+                tool_plan = [("nuclei", ["nuclei", "-u", url, "-silent", "-severity", "critical,high,medium"], "Fallback scan", 60)]
 
-        try:
-            scan_plan = self.llm.chat_json(
-                messages=[{"role": "user", "content": system_prompt}],
-                temperature=0.2,
-            )
-        except Exception as e:
-            self.log(f"  ⚠️ AI plan error: {e}, running default scans")
-            scan_plan = [{"tool": "nuclei", "args": ["-silent", "-severity", "critical,high,medium"], "reason": "default scan"}]
-
-        # Execute the plan
         results = {}
-        commands = scan_plan if isinstance(scan_plan, list) else scan_plan.get("commands", [])
+        total_start = time.time()
 
-        if fast:
-            commands = commands[:2]
-
-        for cmd in commands[:5]:
-            tool = cmd.get("tool", cmd.get("name", ""))
-            args = cmd.get("args", [])
-            reason = cmd.get("reason", "")
-
-            if not tool or not self.tools.check_tool(tool):
-                self.log(f"  ⏭️ {tool} not available")
-                continue
-
-            self.log(f"  🛠️ {tool}: {reason}")
-
-            if tool == "nuclei":
-                output = self.tools.run(
-                    ["nuclei", "-u", url, "-silent", "-severity", "critical,high,medium"],
-                    timeout=180,
-                )
-            elif tool == "nikto":
-                output = self.tools.run(
-                    ["nikto", "-h", url, "-Tuning", "1234789"],
-                    timeout=120,
-                )
-            elif tool == "gobuster":
-                output = self.tools.run(
-                    ["gobuster", "dir", "-u", url, "-w", "/usr/share/wordlists/dirb/common.txt",
-                     "-t", "30", "-q"],
-                    timeout=120,
-                )
-            elif tool == "wpscan":
-                output = self.tools.run(
-                    ["wpscan", "--url", url, "--no-banner", "-e", "vp,vt"],
-                    timeout=180,
-                )
+        for tool_name, args, reason, max_time in tool_plan:
+            # Build command: tool + args + URL
+            if tool_name == "sqlmap":
+                cmd = args + ["-u", url]
+            elif tool_name == "nikto":
+                cmd = args + [url]
+            elif tool_name == "nmap":
+                host = url.split("://")[-1].split("/")[0]
+                cmd = args + [host]
+            elif tool_name in ("gobuster", "ffuf"):
+                cmd = args + ["-u", url]
+            elif tool_name == "wpscan":
+                cmd = args + ["--url", url]
+            elif tool_name == "whatweb":
+                cmd = args + [url]
+            elif tool_name == "httpx":
+                cmd = args + ["-u", url]
+            elif tool_name == "curl":
+                cmd = args + [url]
             else:
-                full_cmd = [tool] + args + [url]
-                output = self.tools.run(full_cmd, timeout=120)
+                # nuclei and others take URL directly
+                cmd = args + ["-u", url]
 
-            self.ws.save_result("scans", tool, output)
-            results[tool] = output
+            # Show real-time progress
+            self.log(f"  🛠️  {tool_name} — {reason}")
+            if self.verbose:
+                print(f"     {' '.join(cmd)[:120]}")
 
-        self.log("✅ Scanning complete")
+            # Run with progress indicator
+            tool_start = time.time()
+            output = self.tools.run(cmd, timeout=max_time + 30)
+            elapsed = time.time() - tool_start
+
+            # Show completion
+            elapsed_str = str(timedelta(seconds=int(elapsed)))
+            status = "✅" if not output.startswith("(") else "⚠️"
+            self.log(f"     {status} {tool_name} done in {elapsed_str}")
+
+            self.ws.save_result("scans", tool_name, output)
+            results[tool_name + "_time"] = elapsed_str
+            results[tool_name] = output
+
+            # Fast mode: exit after first 2 successful tools
+            if fast and len(results) >= 4:  # 2 tools + 2 time entries
+                remaining = [t[0] for t in tool_plan[len(results)//2:]]
+                if remaining:
+                    self.log(f"  ⏭️  Fast mode: skipping {', '.join(remaining)}")
+                break
+
+        total_time = str(timedelta(seconds=int(time.time() - total_start)))
+        self.log(f"✅ Scan complete in {total_time}")
+        results["_total_time"] = total_time
         return results

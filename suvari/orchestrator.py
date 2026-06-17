@@ -164,10 +164,16 @@ class SuvariOrchestrator:
         return self.ws.get_phase_output(phase_id)[:2000]
 
     def _show_results(self):
-        """Show final results."""
+        """Show final results with timing."""
         console.print("\n[bold green]✅ Scan complete![/bold green]")
         report_path = self.ws.path / "report.md"
         console.print(f"[bold]📁 Report:[/bold] {report_path}")
+
+        # Show phase timing
+        recon_time = self.context.get("recon_results", {}).get("_recon_time", "")
+        scan_time = self.context.get("scan_results", {}).get("_total_time", "")
+        if recon_time or scan_time:
+            console.print(f"[dim]  Recon: {recon_time} | Scan: {scan_time}[/dim]")
 
         analysis = self.context.get("analysis", {})
         summary = analysis.get("summary", {})

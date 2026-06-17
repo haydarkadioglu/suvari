@@ -1,8 +1,10 @@
 """
 Recon Agent — gathers information about the target.
-Uses whatweb, nmap, curl for tech/port/header analysis.
+Shows real-time tool execution with elapsed time.
 """
 
+import time
+from datetime import timedelta
 from .base import BaseAgent
 
 
@@ -11,46 +13,79 @@ class ReconAgent(BaseAgent):
 
     def run(self, context: dict) -> dict:
         url = context["target_url"]
-        self.log(f"🌐 Reconnaissance starting: {url}")
+        self.log(f"🌐 Reconnaissance: {url}")
 
         results = {}
+        total_start = time.time()
 
         # 1. whatweb — technology fingerprinting
         if self.tools.check_tool("whatweb"):
-            self.log("  Running whatweb...")
+            self.log(f"  🛠️  whatweb — Technology fingerprinting")
+            t0 = time.time()
             output = self.tools.run(["whatweb", "-v", url], timeout=60)
+            t = str(timedelta(seconds=int(time.time() - t0)))
+            self.log(f"     ✅ whatweb done in {t}")
             self.ws.save_result("recon", "whatweb", output)
             results["whatweb"] = output
         else:
             results["whatweb"] = "(whatweb not installed)"
 
-        # 2. curl — response headers + basic info
-        self.log("  Running curl header analysis...")
+        # 2. curl — response headers
+        self.log(f"  🛠️  curl — HTTP header analysis")
+        t0 = time.time()
         headers = self.tools.run(
             ["curl", "-sI", "-L", url, "--max-time", "15"], timeout=20
         )
+        t = str(timedelta(seconds=int(time.time() - t0)))
+        self.log(f"     ✅ curl done in {t}")
         self.ws.save_result("recon", "headers", headers)
         results["headers"] = headers
 
         # 3. nmap — quick port scan
         if self.tools.check_tool("nmap"):
-            self.log("  Running nmap fast scan...")
+            self.log(f"  🛠️  nmap — Quick port scan")
             host = url.split("://")[-1].split("/")[0]
+            t0 = time.time()
             nmap = self.tools.run(
                 ["nmap", "-T4", "-F", "--open", host], timeout=120
             )
+            t = str(timedelta(seconds=int(time.time() - t0)))
+            self.log(f"     ✅ nmap done in {t}")
             self.ws.save_result("recon", "nmap", nmap)
             results["nmap"] = nmap
         else:
             results["nmap"] = "(nmap not installed)"
 
         # 4. robots.txt check
-        self.log("  Checking robots.txt...")
+        self.log(f"  🛠️  curl — robots.txt check")
+        t0 = time.time()
         robots = self.tools.run(
             ["curl", "-sL", f"{url.rstrip('/')}/robots.txt", "--max-time", "10"], timeout=15
         )
+        t = str(timedelta(seconds=int(time.time() - t0)))
+        self.log(f"     ✅ robots.txt done in {t}")
         self.ws.save_result("recon", "robots", robots)
         results["robots"] = robots
 
-        self.log("✅ Recon complete")
+        # 5. curl — common paths check
+        self.log(f"  🛠️  curl — Common path check")
+        t0 = time.time()
+        common_paths = ["/.git/config", "/.env", "/sitemap.xml", "/crossdomain.xml"]
+        findings = []
+        for path in common_paths:
+            out = self.tools.run(
+                ["curl", "-sI", "-o", "/dev/null", "-w", "%{http_code}",
+                 f"{url.rstrip('/')}{path}", "--max-time", "5"], timeout=10
+            )
+            if out.strip() not in ("404", "301", "302", "403", "(error)", "(empty)"):
+                findings.append(f"{path}: {out.strip()}")
+        t = str(timedelta(seconds=int(time.time() - t0)))
+        common_result = "\n".join(findings) if findings else "No exposed files found"
+        self.log(f"     ✅ common path check done in {t}")
+        self.ws.save_result("recon", "common_paths", common_result)
+        results["common_paths"] = common_result
+
+        total = str(timedelta(seconds=int(time.time() - total_start)))
+        self.log(f"✅ Recon complete in {total}")
+        results["_recon_time"] = total
         return results

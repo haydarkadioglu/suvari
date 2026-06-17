@@ -3,6 +3,8 @@ Analyzer Agent — AI-powered analysis of scan results.
 Inspired by Shannon's vulnerability analysis pipeline.
 """
 
+import time
+from datetime import timedelta
 from .base import BaseAgent
 from ..prompt_loader import PromptLoader
 
@@ -37,14 +39,18 @@ class AnalyzerAgent(BaseAgent):
             scan_data=scan_text[:8000],
         )
 
+        self.log("  🛠️  LLM — AI vulnerability analysis")
+        t0 = time.time()
+
         try:
             analysis = self.llm.chat_json(
                 messages=[{"role": "user", "content": system_prompt}],
                 temperature=0.1,
             )
+            elapsed = str(timedelta(seconds=int(time.time() - t0)))
             self.ws.save_json("analysis", "findings", analysis)
             summary = analysis.get("summary", {})
-            self.log(f"  📊 {summary.get('total', 0)} findings detected")
+            self.log(f"     ✅ Analysis done in {elapsed} — {summary.get('total', 0)} findings")
             return analysis
         except Exception as e:
             self.log(f"  ⚠️ Analysis error: {e}")

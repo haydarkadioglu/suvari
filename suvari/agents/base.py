@@ -27,8 +27,12 @@ class BaseAgent:
         self.verbose = verbose
 
     def log(self, msg: str):
-        if self.verbose:
-            print(f"  [{self.name}] {msg}")
+        if self.verbose or msg.startswith("  🛠️") or msg.startswith("     ✅") or msg.startswith("  ⏭️") or msg.startswith("✅"):
+            print(f"  {msg}")
+
+    def status(self, msg: str):
+        """Always show status messages (tool starts/completions)."""
+        print(f"  {msg}")
 
     def run(self, context: dict) -> dict:
         raise NotImplementedError
