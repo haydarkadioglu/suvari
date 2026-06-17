@@ -160,7 +160,11 @@ class SuvariOrchestrator:
         summary = analysis.get("summary", {})
         if summary.get("total", 0) > 0:
             console.print(f"\n[red] {summary['total']} vulnerabilities found![/red]")
-            console.print(f"  Critical: {summary.get('critical', 0)} | High: {summary.get('high', 0)} | Medium: {summary.get('medium', 0)}")
+            parts = []
+            for sev, icon in [("critical", "🔥"), ("high", "⚠️"), ("medium", "📌"), ("low", "ℹ️"), ("info", "ℹ️")]:
+                if summary.get(sev, 0) > 0:
+                    parts.append(f"{icon} {sev.title()}: {summary[sev]}")
+            console.print(f"  {' | '.join(parts)}")
         else:
             console.print("[green]No significant vulnerabilities detected.[/green]")
 
@@ -182,9 +186,22 @@ class SuvariOrchestrator:
             if self.context.get("user_suggestions"):
                 self.context["analysis_context"] = f"User specifically asked to check: {self.context['user_suggestions']}"
             self.context["analysis"] = self.analyzer_agent.run(self.context)
-            summary = self.context.get("analysis", {}).get("summary", {})
-            vulnerabilities = self.context.get("analysis", {}).get("vulnerabilities", [])
-            self.logger.info("phase", f"Analysis complete: {summary.get('total', 0)} findings")
+            analysis = self.context.get("analysis", {})
+            vulnerabilities = analysis.get("vulnerabilities", [])
+
+            # Recalculate summary from actual vulnerability list
+            sev_count = {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0}
+            for v in vulnerabilities:
+                s = v.get("severity", "low").lower()
+                if s in sev_count:
+                    sev_count[s] += 1
+            analysis["summary"] = {
+                "total": len(vulnerabilities),
+                **sev_count,
+            }
+            self.context["analysis"] = analysis
+
+            self.logger.info("phase", f"Analysis complete: {analysis['summary']['total']} findings")
 
         elif phase_id == "exploit":
             self.context["exploit_results"] = self.exploiter_agent.run(self.context)
