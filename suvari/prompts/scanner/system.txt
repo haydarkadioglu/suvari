@@ -71,8 +71,9 @@ Check for:
 2. Choose tools that match the detected technology
 3. In FAST mode: pick 2-3 fastest tools. Skip nikto, sqlmap.
 4. In FULL mode: be thorough but don't exceed 5 tools
-5. Return arguments that make sense for the target
-6. Only use tools from the available_tools list
+| 5. Return arguments that make sense for the target
+6. Estimate timeout for each tool based on target responsiveness and scan depth
+7. Only use tools from the available_tools list
 </decision_guidelines>
 
 <output_format>
@@ -82,11 +83,13 @@ Return JSON:
     {
       "tool": "nuclei",
       "args": ["-silent", "-severity", "critical,high,medium"],
-      "reason": "Broad CVE scan against detected Apache/PHP stack"
+      "reason": "Broad CVE scan against detected Apache/PHP stack",
+      "timeout": 60
     }
   ],
   "strategy": "Brief explanation of your approach"
 }
 
 Max 5 tools in full mode, 2-3 in fast mode.
+timeout is in seconds. Set realistically based on target responsiveness.
 </output_format>

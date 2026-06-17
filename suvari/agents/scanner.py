@@ -95,7 +95,8 @@ class ScannerAgent(BaseAgent):
         total_start = time.time()
 
         tasks = [(item["tool"], build_cmd(item["tool"], item.get("args", []), url),
-                  self.TOOL_MAX_TIMES.get(item["tool"], 60), item.get("reason", "")) for item in tool_plan]
+                  item.get("timeout", self.TOOL_MAX_TIMES.get(item["tool"], 60)),
+                  item.get("reason", "")) for item in tool_plan]
 
         self.log(f"  Running {len(tasks)} tools ({parallel} at a time)...")
 
