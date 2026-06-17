@@ -5,6 +5,7 @@ Inspired by Shannon's executive report format.
 
 from datetime import datetime
 from .workspace import Workspace
+from .tools.runner import clean_ansi
 
 
 REPORT_TEMPLATE = """# 🐎 Suvari Pentest Report

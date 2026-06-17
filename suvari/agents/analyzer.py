@@ -19,23 +19,23 @@ class AnalyzerAgent(BaseAgent):
         self.log("🧠 AI analyzing results...")
 
         recon_text = "\n\n".join([
-            f"=== {k} ===\n{v[:1000]}"
+            f"=== {k} ===\n{v[:2000]}"
             for k, v in recon_results.items()
             if isinstance(v, str)
         ])
 
         scan_text = "\n\n".join([
-            f"=== {k} ===\n{v[:2000]}"
+            f"=== {k} ===\n{v[:4000]}"
             for k, v in scan_results.items()
             if isinstance(v, str)
         ])
 
         # Load prompt from file
         loader = PromptLoader(url, fast)
-        system_prompt = loader.render_with_shared("analyzer", {
-            "recon_data": recon_text[:2000],
-            "scan_data": scan_text[:4000],
-        })
+        system_prompt = loader.render_with_shared("analyzer",
+            recon_data=recon_text[:4000],
+            scan_data=scan_text[:8000],
+        )
 
         try:
             analysis = self.llm.chat_json(

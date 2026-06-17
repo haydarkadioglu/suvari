@@ -29,10 +29,10 @@ class ScannerAgent(BaseAgent):
 
         # Load prompt from file
         loader = PromptLoader(url, fast)
-        system_prompt = loader.render_with_shared("scanner", {
-            "recon_data": recon_text[:3000],
-            "available_tools": avail,
-        })
+        system_prompt = loader.render_with_shared("scanner",
+            recon_data=recon_text[:3000],
+            available_tools=avail,
+        )
 
         # Ask AI: which scans to run?
         self.log("  AI planning scans...")

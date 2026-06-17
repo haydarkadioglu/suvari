@@ -5,8 +5,18 @@ Docker-free, lightweight sandbox inspired by PentAGI's architecture.
 
 import subprocess
 import shutil
+import re
 from pathlib import Path
 from typing import Optional
+
+
+# ANSI escape sequence cleaner
+_ANSI_RE = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+
+
+def clean_ansi(text: str) -> str:
+    """Remove ANSI escape sequences from tool output."""
+    return _ANSI_RE.sub('', text)
 
 
 class ToolRunner:
@@ -28,7 +38,7 @@ class ToolRunner:
                 timeout=timeout,
                 cwd=workdir,
             )
-            output = result.stdout + result.stderr
+            output = clean_ansi(result.stdout + result.stderr)
             return output.strip() if output else "(empty)"
         except subprocess.TimeoutExpired:
             return f"(TIMEOUT after {timeout}s)"

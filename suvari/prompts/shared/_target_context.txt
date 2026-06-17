@@ -1,5 +1,3 @@
 # Target Context
 - URL: {{ target_url }}
-- Scan started: {{ timestamp }}
-- Phase: {{ phase }}
 - Mode: {% if fast %}Fast (fewer tests){% else %}Full{% endif %}
