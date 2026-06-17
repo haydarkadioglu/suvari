@@ -1,6 +1,5 @@
 """
 Base Agent — abstract base for all Suvari agents.
-Inspired by LuaN1aoAgent's P-E-R (Planner-Executor-Reflector) framework.
 """
 
 from typing import Optional
@@ -35,9 +34,13 @@ class BaseAgent:
         self.verbose = verbose
 
     def log(self, msg: str):
-        """Show log messages. Tool operations always visible."""
-        if self.verbose or msg.startswith(("  🛠️", "     ✅", "✅", "  ⏭️", "  ⚠️", "🔍", "🌐", "🧠")):
-            print(f"  {msg}")
+        """Always show agent messages."""
+        print(f"  {msg}")
+
+    def debug(self, msg: str):
+        """Show debug messages only in verbose mode."""
+        if self.verbose:
+            print(f"  [debug] {msg}")
 
     def run(self, context: dict) -> dict:
         raise NotImplementedError
