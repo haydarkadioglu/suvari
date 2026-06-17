@@ -39,6 +39,7 @@ class SuvariOrchestrator:
                  model: Optional[str] = None, recon_only: bool = False, fast: bool = False,
                  verbose: bool = False, scan_mode: ScanMode = ScanMode.GUIDED,
                  parallel: int = 3, chain_mode: bool = False,
+                 login_creds: Optional[str] = None,
                  source_dir: Optional[Path] = None, server_scan: bool = False):
         self.target_url = target_url
         self.ws = workspace
@@ -48,6 +49,7 @@ class SuvariOrchestrator:
         self.mode = scan_mode
         self.parallel = parallel
         self.chain_mode = chain_mode
+        self.login_creds = login_creds
         self.source_dir = source_dir
         self.server_scan = server_scan
 
@@ -68,7 +70,8 @@ class SuvariOrchestrator:
         self.reporter = ReportGenerator(self.ws, self.target_url)
 
         self.context = {"target_url": target_url, "fast": fast, "source_dir": source_dir,
-                        "mode": scan_mode, "server_scan": server_scan, "parallel": parallel}
+                        "mode": scan_mode, "server_scan": server_scan, "parallel": parallel,
+                        "login_creds": login_creds}
 
     def run(self):
         """Start (or resume) the pipeline."""
@@ -179,6 +182,33 @@ class SuvariOrchestrator:
             self.logger.info("phase", "Recon complete")
 
         elif phase_id == "scan":
+            # Browser-based analysis first (if login provided)
+            browser_findings = []
+            if self.login_creds:
+                console.print("  Browser: Login + DOM XSS scan")
+                try:
+                    from .browser import BrowserAgent
+                    creds = self.login_creds.split(":", 1)
+                    with BrowserAgent() as browser:
+                        # Login
+                        login_result = browser.login_form(self.target_url, creds[0], creds[1])
+                        if login_result.get("success"):
+                            console.print(f"  Login OK -> {login_result.get('final_url', '?')}")
+                            # DOM XSS check
+                            dom_xss = browser.check_dom_xss(self.target_url)
+                            if dom_xss:
+                                browser_findings = dom_xss
+                                console.print(f"  DOM XSS: {len(dom_xss)} findings")
+                            # Screenshot
+                            ss = browser.screenshot(str(self.ws.path / "browser_login.png"))
+                            if ss:
+                                console.print(f"  Screenshot saved")
+                        else:
+                            console.print(f"  Login failed: {login_result.get('error', 'unknown')}")
+                except Exception as e:
+                    console.print(f"  Browser error: {e}")
+
+            # Tree chain scan
             if self.chain_mode:
                 from .chain import ScanChain
                 console.print("  Tree-based recursive scan chain")

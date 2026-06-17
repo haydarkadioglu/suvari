@@ -61,6 +61,7 @@ def scan(
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
     mode: str = typer.Option("guided", "--mode", "-M", help="Scan mode: auto / guided / interactive"),
     parallel: int = typer.Option(3, "--parallel", "-P", help="Parallel tool count"),
+    login: Optional[str] = typer.Option(None, "--login", "-l", help="Login credentials: username:password"),
     server: bool = typer.Option(False, "--server", "-s", help="Full server scan (SSH, FTP, SMB, DB, all ports)"),
     source: Optional[Path] = typer.Option(None, "--source", "-r", help="Source code directory (white-box mode)"),
 ):
@@ -87,7 +88,8 @@ def scan(
         verbose=verbose,
         scan_mode=scan_mode,
         parallel=parallel,
-        chain_mode=True,  # Tree-based scanning is default
+        chain_mode=True,
+        login_creds=login,  # Tree-based scanning is default
         source_dir=source,
         server_scan=server,
     )
@@ -250,6 +252,7 @@ def help():
     t.add_row("scan <url>", "Full scan — tree-based recon → analysis → report")
     t.add_row("", "  -f, --fast       Quick scan (fewer tests)")
     t.add_row("", "  -s, --server     Server scan (all ports + services)")
+    t.add_row("", "  -l, --login      Login credentials (user:pass) for auth scans")
     t.add_row("", "  -r, --source     White-box mode (with source code)")
     t.add_row("", "  -P, --parallel   Parallel tools (default: 3)")
     t.add_row("", "  -M, --mode       auto | guided | interactive")
