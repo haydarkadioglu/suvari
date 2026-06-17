@@ -33,22 +33,33 @@ XSS_PAYLOADS = [
 
 
 class BrowserAgent:
-    """Browser-based security analysis agent."""
+    """Browser-based security analysis agent.
+    Supports chromium, firefox, and webkit (playwright).
+    """
 
-    def __init__(self, headless: bool = True, timeout: int = 15000):
+    def __init__(self, headless: bool = True, timeout: int = 15000, browser_type: str = "chromium"):
         if not HAS_PLAYWRIGHT:
-            raise RuntimeError("Playwright not installed. Run: pip install playwright && python3 -m playwright install chromium")
+            raise RuntimeError("Playwright not installed. Run: pip install playwright && python3 -m playwright install")
+        if browser_type not in ("chromium", "firefox", "webkit"):
+            browser_type = "chromium"
         self.headless = headless
         self.timeout = timeout
+        self.browser_type = browser_type
         self._playwright = None
         self._browser = None
         self._context = None
         self._page = None
 
     def start(self):
-        """Launch browser."""
+        """Launch browser (chromium, firefox, or webkit)."""
         self._playwright = sync_playwright().start()
-        self._browser = self._playwright.chromium.launch(headless=self.headless)
+        browser_map = {
+            "chromium": self._playwright.chromium,
+            "firefox": self._playwright.firefox,
+            "webkit": self._playwright.webkit,
+        }
+        browser_engine = browser_map.get(self.browser_type, self._playwright.chromium)
+        self._browser = browser_engine.launch(headless=self.headless)
         self._context = self._browser.new_context(
             viewport={"width": 1280, "height": 720},
             user_agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",

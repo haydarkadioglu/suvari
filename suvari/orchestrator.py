@@ -39,7 +39,7 @@ class SuvariOrchestrator:
                  model: Optional[str] = None, recon_only: bool = False, fast: bool = False,
                  verbose: bool = False, scan_mode: ScanMode = ScanMode.GUIDED,
                  parallel: int = 3, chain_mode: bool = False,
-                 login_creds: Optional[str] = None,
+                 login_creds: Optional[str] = None, browser_type: str = "chromium",
                  source_dir: Optional[Path] = None, server_scan: bool = False):
         self.target_url = target_url
         self.ws = workspace
@@ -50,6 +50,7 @@ class SuvariOrchestrator:
         self.parallel = parallel
         self.chain_mode = chain_mode
         self.login_creds = login_creds
+        self.browser_type = browser_type
         self.source_dir = source_dir
         self.server_scan = server_scan
 
@@ -187,7 +188,7 @@ class SuvariOrchestrator:
             console.print("  Browser: Dynamic page analysis + DOM XSS")
             try:
                 from .browser import BrowserAgent
-                with BrowserAgent() as browser:
+                with BrowserAgent(browser_type=self.browser_type) as browser:
                     # 1. Navigate to target
                     page_info = browser.navigate(self.target_url)
                     if page_info.get("status", 0) in (200, 301, 302, 403):
