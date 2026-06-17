@@ -57,6 +57,7 @@ def scan(
     recon_only: bool = typer.Option(False, "--recon-only", help="Run recon only"),
     fast: bool = typer.Option(False, "--fast", "-f", help="Fast mode (fewer tests)"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
+    source: Optional[Path] = typer.Option(None, "--source", "-r", help="Source code directory (white-box mode)"),
 ):
     """🔍 Scan target URL — recon → vulnerability scan → analysis → report"""
     banner()
@@ -64,6 +65,8 @@ def scan(
     ws = Workspace(name or url, output)
     console.print(f"[bold]🎯 Target:[/bold] {url}")
     console.print(f"[bold]🤖 Model:[/bold] {provider}/{model or 'default'}")
+    if source:
+        console.print(f"[bold]📁 Source:[/bold] {source} (white-box mode)")
     console.print(f"[bold]📁 Output:[/bold] {ws.path}\n")
     orchestrator = SuvariOrchestrator(
         target_url=url,
@@ -73,6 +76,7 @@ def scan(
         recon_only=recon_only,
         fast=fast,
         verbose=verbose,
+        source_dir=source,
     )
     orchestrator.run()
 

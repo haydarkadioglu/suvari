@@ -42,12 +42,14 @@ class SuvariOrchestrator:
         recon_only: bool = False,
         fast: bool = False,
         verbose: bool = False,
+        source_dir: Optional[Path] = None,
     ):
         self.target_url = target_url
         self.ws = workspace
         self.recon_only = recon_only
         self.fast = fast
         self.verbose = verbose
+        self.source_dir = source_dir
 
         self.state = PipelineState(workspace.path)
         self.logger = ScanLogger(workspace.path)
@@ -67,7 +69,7 @@ class SuvariOrchestrator:
         self.exploiter_agent = ExploiterAgent("exploiter", self.llm, self.ws, self.tools, verbose)
         self.reporter = ReportGenerator(self.ws, self.target_url)
 
-        self.context = {"target_url": target_url, "fast": fast}
+        self.context = {"target_url": target_url, "fast": fast, "source_dir": source_dir}
 
     def run(self):
         """Start (or resume) the pipeline with P-E-R adaptive execution."""
