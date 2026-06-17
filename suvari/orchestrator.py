@@ -1,5 +1,5 @@
 """
-Orchestrator — main pipeline controller.
+Orchestrator — main pipeline controller with P-E-R integration + checkpoint/resume.
 Inspired by Shannon's multi-agent pipeline + LuaN1aoAgent's P-E-R framework.
 """
 
@@ -14,12 +14,15 @@ from .agents.scanner import ScannerAgent
 from .agents.analyzer import AnalyzerAgent
 from .agents.exploiter import ExploiterAgent
 from .report import ReportGenerator
+from .state import PipelineState
+from .core import Planner, Reflector
+from .prompt_loader import PromptLoader
 
 console = Console()
 
 
 class SuvariOrchestrator:
-    """Main orchestrator — manages the pipeline."""
+    """Main orchestrator — manages the pipeline with P-E-R and resume support."""
 
     PHASES = [
         ("recon", "🌐 Reconnaissance", "Target analysis"),
@@ -45,9 +48,16 @@ class SuvariOrchestrator:
         self.fast = fast
         self.verbose = verbose
 
+        self.state = PipelineState(workspace.path)
         self.llm = LLMClient(provider=provider, model=model)
         self.tools = ToolRunner(verbose=verbose)
+        self.prompts = PromptLoader(target_url, fast)
 
+        # P-E-R components
+        self.planner = Planner(self.llm, self.tools, self.prompts)
+        self.reflector = Reflector(self.llm)
+
+        # Agents (executors)
         self.recon_agent = ReconAgent("recon", self.llm, self.ws, self.tools, verbose)
         self.scanner_agent = ScannerAgent("scanner", self.llm, self.ws, self.tools, verbose)
         self.analyzer_agent = AnalyzerAgent("analyzer", self.llm, self.ws, self.tools, verbose)
@@ -57,7 +67,13 @@ class SuvariOrchestrator:
         self.context = {"target_url": target_url, "fast": fast}
 
     def run(self):
-        """Start the pipeline."""
+        """Start (or resume) the pipeline with P-E-R adaptive execution."""
+
+        # Check if resuming
+        is_resume = self.state.has_partial_run()
+        if is_resume:
+            done = ", ".join(self.state.completed)
+            console.print(f"[yellow]🔄 Resuming scan — already completed: {done}[/yellow]")
 
         avail = self.tools.available_tools()
         console.print(f"[bold]🧰 Available Tools:[/bold] {', '.join(avail.keys()) or '(none)'}")
@@ -65,10 +81,28 @@ class SuvariOrchestrator:
             console.print("[yellow]⚠️ No Kali tools found. Only curl and AI analysis will work.[/yellow]")
         console.print("")
 
+        # Determine phases to run
         phases = self.PHASES
         if self.recon_only:
             phases = [self.PHASES[0]]
 
+        # Skip completed phases on resume
+        if is_resume:
+            remaining = self.state.resume_from(phases)
+            if not remaining:
+                console.print("[green]✅ All phases already completed! Showing report.[/green]")
+                self._show_results()
+                return
+            skipped = [p[1] for p in phases if p[0] in self.state.completed]
+            if skipped:
+                console.print(f"[dim]⏭️ Skipping completed: {', '.join(skipped)}[/dim]")
+            phases = remaining
+
+        # Initialize state if new scan
+        if not is_resume:
+            self.state.start(self.target_url)
+
+        # Run phases with P-E-R
         with Progress(
             SpinnerColumn(),
             TextColumn("[progress.description]{task.description}"),
@@ -77,15 +111,60 @@ class SuvariOrchestrator:
 
             for phase_id, phase_name, phase_desc in phases:
                 task = progress.add_task(f"{phase_name} — {phase_desc}", total=None)
+                self.state.phase_start(phase_id)
+
                 try:
+                    # PLAN: Planner decides approach for this phase
+                    plan = self.planner.decide(
+                        phase=phase_id,
+                        completed=self.state.completed,
+                        last_results=self.context,
+                    )
+                    action = plan.get("next_action", phase_id)
+
+                    if self.verbose:
+                        console.print(f"\n[dim]  📋 Plan: {plan.get('reasoning', '')[:100]}[/dim]")
+
+                    # EXECUTE: Run the phase
                     self._run_phase(phase_id)
+
+                    # REFLECT: Reflector analyzes the results
+                    if phase_id != "report":
+                        phase_output = self._get_phase_output(phase_id)
+                        reflection = self.reflector.analyze(
+                            last_action=phase_id,
+                            tool=action,
+                            output=phase_output,
+                            target_url=self.target_url,
+                        )
+
+                        # Feed findings back to planner
+                        for finding in reflection.get("findings", []):
+                            self.planner.add_knowledge(finding)
+
+                        if self.verbose:
+                            ref_success = reflection.get("success", False)
+                            ref_findings = len(reflection.get("findings", []))
+                            console.print(f"  [dim]🔍 Reflection: {'✅' if ref_success else '⚠️'} {ref_findings} findings[/dim]")
+
+                    self.state.phase_complete(phase_id)
+
                 except Exception as e:
                     console.print(f"\n[red]❌ {phase_name} error: {e}[/red]")
                     self.context["error"] = str(e)
+                    self.state.set_error(str(e))
                     break
                 finally:
                     progress.remove_task(task)
 
+        self._show_results()
+
+    def _get_phase_output(self, phase_id: str) -> str:
+        """Get combined output from a phase for reflection."""
+        return self.ws.get_phase_output(phase_id)[:2000]
+
+    def _show_results(self):
+        """Show final results."""
         console.print("\n[bold green]✅ Scan complete![/bold green]")
         report_path = self.ws.path / "report.md"
         console.print(f"[bold]📁 Report:[/bold] {report_path}")

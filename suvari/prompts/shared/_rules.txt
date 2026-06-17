@@ -1,0 +1,11 @@
+# Rules of Engagement
+- Only test targets you own or have explicit permission to test
+- Do not use destructive payloads (DROP TABLE, rm -rf, etc.)
+- Rate-limit requests to avoid DoS
+- Stop testing if target shows signs of instability
+- Report all findings regardless of severity
+
+# Scope
+- Focus on: Injection, XSS, SSRF, Broken Authentication, Broken Authorization
+- Secondary: Information Disclosure, Security Misconfiguration
+- Out of scope: Social engineering, physical attacks, client-side attacks requiring user interaction

@@ -5,23 +5,7 @@ Inspired by Shannon's multi-agent approach.
 """
 
 from .base import BaseAgent
-
-
-SCANNER_PROMPT = """You are a vulnerability scanning expert. Based on the recon results, decide which scans to run.
-
-Recon Results:
-{recon_data}
-
-Available tools: {available_tools}
-
-Choose the most relevant scans for this target. Return a JSON list of commands to run.
-Each command: {{"tool": "name", "args": ["arg1", "arg2"], "reason": "why this scan"}}
-
-Start with the most impactful scans first. Consider:
-- Web technology detected (WordPress? -> wpscan, PHP? -> specific nuclei templates)
-- Open ports (80/443 only vs many ports)
-- If target seems simple/static, go lighter
-"""
+from ..prompt_loader import PromptLoader
 
 
 class ScannerAgent(BaseAgent):
@@ -42,31 +26,34 @@ class ScannerAgent(BaseAgent):
         ])
 
         avail = self.tools.available_tools()
-        avail_text = "\n".join([f"  - {k}: {v}" for k, v in avail.items()])
+
+        # Load prompt from file
+        loader = PromptLoader(url, fast)
+        system_prompt = loader.render_with_shared("scanner", {
+            "recon_data": recon_text[:3000],
+            "available_tools": avail,
+        })
 
         # Ask AI: which scans to run?
         self.log("  AI planning scans...")
 
         try:
             scan_plan = self.llm.chat_json(
-                messages=[{"role": "user", "content": SCANNER_PROMPT.format(
-                    recon_data=recon_text[:3000],
-                    available_tools=avail_text,
-                )}],
+                messages=[{"role": "user", "content": system_prompt}],
                 temperature=0.2,
             )
         except Exception as e:
             self.log(f"  ⚠️ AI plan error: {e}, running default scans")
-            scan_plan = [{"tool": "nuclei", "args": [], "reason": "default scan"}]
+            scan_plan = [{"tool": "nuclei", "args": ["-silent", "-severity", "critical,high,medium"], "reason": "default scan"}]
 
         # Execute the plan
         results = {}
         commands = scan_plan if isinstance(scan_plan, list) else scan_plan.get("commands", [])
 
         if fast:
-            commands = commands[:2]  # Fast mode: only first 2
+            commands = commands[:2]
 
-        for cmd in commands[:5]:  # Max 5 scans
+        for cmd in commands[:5]:
             tool = cmd.get("tool", cmd.get("name", ""))
             args = cmd.get("args", [])
             reason = cmd.get("reason", "")
