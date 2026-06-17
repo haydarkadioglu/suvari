@@ -3,11 +3,13 @@ Chat — interactive pentesting conversation.
 Like talking to a security expert. Give commands naturally.
 """
 
-import time
 from typing import Optional
+from pathlib import Path
 from rich.console import Console
 from rich.panel import Panel
 from rich.markdown import Markdown
+from rich.prompt import Prompt
+from rich.rule import Rule
 from .llm import LLMClient
 from .workspace import Workspace
 from .orchestrator import SuvariOrchestrator
@@ -20,24 +22,20 @@ console = Console()
 SYSTEM_PROMPT = """You are Suvari, an AI-powered penetration testing assistant. You help users test web applications and servers for security vulnerabilities.
 
 You have access to:
-- Scanning: full pipeline (recon → scan → analyze → exploit → report)
+- Scanning: full pipeline (recon -> scan -> analyze -> exploit -> report)
 - Tools: nmap, whatweb, nuclei, nikto, gobuster, ffuf, sqlmap, wpscan, curl, httpx
 - Modes: auto (silent), guided (ask me), interactive (chat)
 - Server mode: all ports + services
 - White-box mode: with source code
 
 When the user asks you to scan something:
-1. Acknowledge the target
-2. Run the scan
-3. Summarize findings
-4. Ask what to do next
-
-If they ask about a specific vulnerability or technique:
-- Explain it briefly
-- Offer to test it
-- Suggest related checks
+1. Acknowledge the target briefly
+2. Explain what you'll check in 1-2 sentences
+3. Wait for the scan to complete
+4. Summarize findings
 
 Keep responses concise and actionable.
+Respond in the same language as the user.
 """
 
 
@@ -57,17 +55,18 @@ class ChatSession:
         """Start the chat loop."""
         console.print(Panel.fit(
             "[bold yellow]🐎 Suvari Chat[/bold yellow]\n"
-            "[dim]AI Pentester Assistant — type 'help' for commands[/dim]",
+            "[dim]AI Pentester Assistant — write naturally, I'll figure it out[/dim]",
             border_style="yellow"
         ))
-        console.print("  Try: [bold]scan https://example.com[/bold]")
-        console.print("  Try: [bold]check /api on juice-shop[/bold]")
-        console.print("  Try: [bold]what tools do you have?[/bold]")
-        console.print("  Type [bold]exit[/bold] to quit\n")
+        console.print("  [dim]Examples:[/dim]")
+        console.print("    [bold]scan https://example.com[/bold]")
+        console.print("    [bold]check /api on that site[/bold]")
+        console.print("    [bold]show the report[/bold]")
+        console.print("    [bold]exit[/bold] to quit\n")
 
         while True:
             try:
-                user_input = input("  \033[1;33mYou\033[0m > ").strip()
+                user_input = Prompt.ask("[bold yellow]You[/bold yellow]").strip()
                 if not user_input:
                     continue
                 if user_input.lower() in ("exit", "quit", "q"):
@@ -80,64 +79,59 @@ class ChatSession:
                 self.history.append({"role": "user", "content": user_input})
                 self._handle_input(user_input)
 
-            except KeyboardInterrupt:
+            except (KeyboardInterrupt, EOFError):
                 console.print("\n[yellow]Goodbye![/yellow]")
-                break
-            except EOFError:
                 break
 
     def _show_help(self):
-        """Show available commands."""
-        console.print("""
-  [bold]Commands:[/bold]
-    scan <url>              Run full scan (recon → analysis → report)
-    scan <url> --fast       Quick scan
-    scan <url> -s           Server scan (all ports)
-    scan <url> -r <path>    White-box scan (with source code)
-    
-    recon <url>             Reconnaissance only
-    
-    check <endpoint>        Quick check on specific endpoint
-    nmap <host>             Run nmap
-    whatweb <url>           Run whatweb
-    
-    help                    Show this message
-    history                 Show scan history
-    report                  Show last scan report
-    
-    exit / quit             Exit chat
-        """)
+        from rich.table import Table
+        t = Table(show_header=False, box=None)
+        t.add_column("Command", style="bold cyan")
+        t.add_column("Description")
+        t.add_row("scan <url>", "Full scan: recon -> analysis -> report")
+        t.add_row("scan <url> -s", "Server scan (all ports)")
+        t.add_row("scan <url> -r ./src", "White-box scan")
+        t.add_row("recon <url>", "Reconnaissance only")
+        t.add_row("check <path>", "Quick endpoint check")
+        t.add_row("report", "Show last scan report")
+        t.add_row("history", "List previous scans")
+        t.add_row("exit", "Quit chat")
+        console.print(t)
 
     def _handle_input(self, text: str):
-        """Process user input and execute appropriate action."""
-        text_lower = text.lower().strip()
+        t = text.strip().lower()
 
-        # Scan commands
-        if text_lower.startswith("scan ") or text_lower.startswith("scan "):
+        if t.startswith("scan "):
             self._cmd_scan(text)
             return
-
-        if text_lower.startswith("recon "):
+        if t.startswith("recon "):
             self._cmd_recon(text)
             return
-
-        if text_lower == "report" and self.last_scan_dir:
+        if t == "report" and self.last_scan_dir:
             self._show_report()
             return
-
-        if text_lower in ("history", "list"):
+        if t in ("history", "scans", "list"):
             self._list_scans()
             return
-
-        if text_lower.startswith("check "):
+        if t.startswith("check "):
             self._cmd_check(text)
             return
 
-        # For everything else, let the LLM respond
-        self._llm_chat()
+        # General chat — let LLM respond
+        console.print()
+        try:
+            response = self.llm.chat(
+                messages=self.history[-6:],
+                temperature=0.7,
+                max_tokens=512,
+            )
+            console.print(response)
+            self.history.append({"role": "assistant", "content": response})
+        except Exception as e:
+            console.print(f"[red]Error: {e}[/red]")
 
     def _cmd_scan(self, text: str):
-        """Parse and run a scan command."""
+        """Parse and run a scan from chat input."""
         parts = text.split()
         url = None
         fast = False
@@ -163,20 +157,26 @@ class ChatSession:
             i += 1
 
         if not url:
+            # Try to extract URL more aggressively
+            for p in parts[1:]:
+                if not p.startswith("-"):
+                    url = p
+                    break
+
+        if not url:
             console.print("[red]Please provide a URL. Example: scan https://example.com[/red]")
             return
 
-        # Add http:// if missing
         if not url.startswith("http"):
             url = "https://" + url
 
-        console.print(f"\n[bold] Scanning {url}...[/bold]")
+        # Quick AI acknowledgment
+        console.print(f"[dim]Starting scan: {url}[/dim]")
         if fast:
-            console.print("  Fast mode")
+            console.print("[dim]Fast mode[/dim]")
         if server:
-            console.print("  Server mode (all ports)")
-        if source:
-            console.print(f"  White-box: {source}")
+            console.print("[dim]Server mode (all ports)[/dim]")
+        console.print()
 
         # Run orchestrator
         ws = Workspace(url)
@@ -193,93 +193,91 @@ class ChatSession:
         orchestrator.run()
         self.last_scan_dir = ws.path
 
-        # Brief summary
+        # After scan: summary
         analysis = orchestrator.context.get("analysis", {})
+        findings = analysis.get("vulnerabilities", [])
         summary = analysis.get("summary", {})
-        total = summary.get("total", 0)
-        if total > 0:
-            vulns = analysis.get("vulnerabilities", [])[:3]
-            for v in vulns:
-                console.print(f"  [{v.get('severity','?')}] {v.get('type','?')} — {v.get('location','')}")
-            if len(vulns) < total:
-                console.print(f"  ... and {total - len(vulns)} more findings")
 
-        self.history.append({"role": "assistant", "content": f"Scan complete for {url}. Found {total} findings. Report at {ws.path / 'report.md'}"})
+        console.print(Rule(style="dim"))
+        if findings:
+            console.print(f"[bold red]Found {len(findings)} issues:[/bold red]")
+            for v in findings[:5]:
+                sev = v.get("severity", "?")
+                icon = {"CRITICAL": "🔥", "HIGH": "⚠️", "MEDIUM": "📌", "LOW": "ℹ️"}.get(sev, "•")
+                console.print(f"  {icon} [{sev}] {v.get('type','?')} — {v.get('location','')}")
+            if len(findings) > 5:
+                console.print(f"  ... and {len(findings) - 5} more")
+        else:
+            console.print("[green]No significant issues found.[/green]")
+
+        console.print(f"[dim]Report: {ws.path / 'report.md'}[/dim]")
+        console.print()
+        self.history.append({
+            "role": "assistant",
+            "content": f"Scan complete for {url}. Found {summary.get('total', 0)} findings: "
+                       f"{', '.join(f['type'] for f in findings[:3])}"
+        })
 
     def _cmd_recon(self, text: str):
         """Run recon only."""
         url = text.split()[-1]
         if not url.startswith("http"):
             url = "https://" + url
-        console.print(f"\n[bold] Reconnaissance: {url}...[/bold]")
 
+        console.print(f"[dim]Reconnaissance: {url}[/dim]")
         from .agents.recon import ReconAgent
         ws = Workspace(f"recon-{url.strip('/').split('/')[-1]}")
-        llm = self.llm
-        tr = self.tools
-        agent = ReconAgent("recon", llm, ws, tr)
+        agent = ReconAgent("recon", self.llm, ws, self.tools)
         results = agent.run({"target_url": url})
-        console.print(f"\n[green]Recon complete. Output: {ws.path}[/green]")
+        console.print(f"[green]Recon complete.[/green] [dim]{ws.path}[/dim]")
         self.history.append({"role": "assistant", "content": f"Recon complete for {url}"})
 
     def _cmd_check(self, text: str):
         """Quick check on a specific endpoint."""
         parts = text.split()
         if len(parts) < 2:
-            console.print("[red]Specify what to check. Example: check /api[/red]")
+            console.print("[red]Specify endpoint. Example: check /api[/red]")
             return
-        endpoint = parts[1]
-        url = f"{self._get_base_url()}{endpoint}" if self._get_base_url() else endpoint
 
-        console.print(f"\n[bold] Checking {endpoint}...[/bold]")
-        output = self.tools.run(["curl", "-sI", url, "--max-time", "10"], timeout=15)
-        console.print(output[:500] if output else "(no response)")
+        endpoint = parts[1]
+        base = self._get_last_target()
+        url = f"{base}{endpoint}" if base else endpoint
+
+        console.print(f"[dim]Checking: {url}[/dim]")
+        out = self.tools.run(["curl", "-sI", url, "--max-time", "10"], timeout=15)
+        lines = out[:500].split("\n")
+        for line in lines[:10]:
+            console.print(f"  {line}")
         self.history.append({"role": "assistant", "content": f"Check results for {endpoint}"})
 
-    def _get_base_url(self) -> str:
-        """Try to get the base URL from chat history."""
+    def _get_last_target(self) -> str:
+        """Get the last scanned URL from history."""
         for msg in reversed(self.history):
-            if msg["role"] == "assistant" and "Scan complete for" in msg.get("content", ""):
-                parts = msg["content"].split()
-                for p in parts:
-                    if p.startswith("http"):
-                        return p.rstrip(".")
+            if msg["role"] == "assistant" and "Scan complete" in msg.get("content", ""):
+                for word in msg["content"].split():
+                    if word.startswith("http"):
+                        return word.rstrip(".")
         return ""
 
     def _show_report(self):
-        """Show the last scan report."""
+        """Show last scan report."""
         if not self.last_scan_dir:
-            console.print("[red]No scan results yet. Run a scan first.[/red]")
+            console.print("[red]No scan results yet.[/red]")
             return
-        report_file = self.last_scan_dir / "report.md"
-        if report_file.exists():
-            console.print(Markdown(report_file.read_text()[:2000]))
+        report = self.last_scan_dir / "report.md"
+        if report.exists():
+            console.print(Markdown(report.read_text()[:2500]))
         else:
             console.print("[red]Report not found.[/red]")
 
     def _list_scans(self):
-        """List previous scans."""
-        from pathlib import Path
-        output_dir = Path("output")
-        if not output_dir.exists():
-            console.print("[yellow]No scans found.[/yellow]")
+        """List previous scan directories."""
+        p = Path("output")
+        if not p.exists():
+            console.print("[yellow]No scans yet.[/yellow]")
             return
-        for d in sorted(output_dir.iterdir()):
+        for d in sorted(p.iterdir()):
             if d.is_dir():
-                report = d / "report.md"
-                status = "✅" if report.exists() else "🔄"
-                console.print(f"  {status} {d.name}")
-
-    def _llm_chat(self):
-        """Let the LLM respond to general questions."""
-        console.print("  \033[0;32mSuvari\033[0m > ", end="")
-        try:
-            response = self.llm.chat(
-                messages=self.history[-5:],
-                temperature=0.7,
-                max_tokens=512,
-            )
-            console.print(response)
-            self.history.append({"role": "assistant", "content": response})
-        except Exception as e:
-            console.print(f"[red]Error: {e}[/red]")
+                r = d / "report.md"
+                s = "✅" if r.exists() else "🔄"
+                console.print(f"  {s} {d.name}")
