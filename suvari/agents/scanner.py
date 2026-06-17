@@ -8,6 +8,7 @@ import sys
 from urllib.parse import urlparse, urlunparse
 from .base import BaseAgent, fmt_time
 from ..prompt_loader import PromptLoader
+from ..mode import ScanMode, ask_user
 
 
 def clean_url(url: str) -> str:
@@ -31,6 +32,7 @@ class ScannerAgent(BaseAgent):
         url = clean_url(context["target_url"])
         recon_results = context.get("recon_results", {})
         fast = context.get("fast", False)
+        mode = context.get("mode", ScanMode.GUIDED)
 
         self.log(f" Scanning: {url}")
 
@@ -90,20 +92,27 @@ class ScannerAgent(BaseAgent):
                 self.log(f"  Unknown tool: {tool_name}, skipping")
                 continue
 
-            # Ask user before slow tools
-            if max_time > 30:
-                try:
-                    self.log(f"  {tool_name} — {reason[:80]}")
-                    self.log(f"     (estimated: up to {max_time}s)")
-                    ans = input(f"     Run {tool_name}? [Y/n] ").strip().lower()
-                    if ans in ("n", "no"):
-                        self.log(f"     Skipped (user declined)")
-                        results[tool_name] = "(skipped by user)"
-                        results[f"{tool_name}_time"] = "skipped"
-                        results[f"{tool_name}_status"] = "SKIPPED"
-                        continue
-                except (EOFError, KeyboardInterrupt):
-                    pass
+            # Ask user based on mode
+            if mode == ScanMode.INTERACTIVE:
+                # In interactive mode, ask before EVERY tool
+                self.log(f"  {tool_name} — {reason[:80]}")
+                ans = input(f"     Run {tool_name}? [Y/n] ").strip().lower()
+                if ans in ("n", "no"):
+                    self.log(f"     Skipped (user declined)")
+                    results[tool_name] = "(skipped by user)"
+                    results[f"{tool_name}_time"] = "skipped"
+                    results[f"{tool_name}_status"] = "SKIPPED"
+                    continue
+            elif max_time > 30 and mode.ask_if_slow:
+                # In guided mode: ask only for slow tools
+                self.log(f"  {tool_name} — {reason[:80]}")
+                self.log(f"     (estimated: up to {max_time}s)")
+                if not ask_user(f"Run {tool_name} (takes ~{max_time}s)?", default=False):
+                    self.log(f"     Skipped (user declined)")
+                    results[tool_name] = "(skipped by user)"
+                    results[f"{tool_name}_time"] = "skipped"
+                    results[f"{tool_name}_status"] = "SKIPPED"
+                    continue
 
             # Execute
             self.log(f"  {tool_name} — {reason[:80]}")

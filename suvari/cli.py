@@ -10,6 +10,7 @@ from rich.panel import Panel
 from .orchestrator import SuvariOrchestrator
 from .workspace import Workspace
 from .config import configure_interactive, load_config
+from .mode import ScanMode
 
 console = Console()
 app = typer.Typer(
@@ -57,14 +58,17 @@ def scan(
     recon_only: bool = typer.Option(False, "--recon-only", help="Run recon only"),
     fast: bool = typer.Option(False, "--fast", "-f", help="Fast mode (fewer tests)"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
+    mode: str = typer.Option("guided", "--mode", "-M", help="Scan mode: auto / guided / interactive"),
     source: Optional[Path] = typer.Option(None, "--source", "-r", help="Source code directory (white-box mode)"),
 ):
     """🔍 Scan target URL — recon → vulnerability scan → analysis → report"""
     banner()
     provider, model = _resolve_provider(provider, model)
+    scan_mode = ScanMode.from_str(mode)
     ws = Workspace(name or url, output)
     console.print(f"[bold]🎯 Target:[/bold] {url}")
     console.print(f"[bold]🤖 Model:[/bold] {provider}/{model or 'default'}")
+    console.print(f"[bold]⚙️  Mode:[/bold] {scan_mode}")
     if source:
         console.print(f"[bold]📁 Source:[/bold] {source} (white-box mode)")
     console.print(f"[bold]📁 Output:[/bold] {ws.path}\n")
@@ -76,6 +80,7 @@ def scan(
         recon_only=recon_only,
         fast=fast,
         verbose=verbose,
+        scan_mode=scan_mode,
         source_dir=source,
     )
     orchestrator.run()

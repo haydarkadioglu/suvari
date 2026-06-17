@@ -18,6 +18,7 @@ from .state import PipelineState
 from .core import Planner, Reflector
 from .prompt_loader import PromptLoader
 from .scan_logger import ScanLogger
+from .mode import ScanMode, ask_user, show_finding
 
 console = Console()
 
@@ -42,6 +43,7 @@ class SuvariOrchestrator:
         recon_only: bool = False,
         fast: bool = False,
         verbose: bool = False,
+        scan_mode: ScanMode = ScanMode.GUIDED,
         source_dir: Optional[Path] = None,
     ):
         self.target_url = target_url
@@ -49,6 +51,7 @@ class SuvariOrchestrator:
         self.recon_only = recon_only
         self.fast = fast
         self.verbose = verbose
+        self.mode = scan_mode
         self.source_dir = source_dir
 
         self.state = PipelineState(workspace.path)
@@ -69,7 +72,7 @@ class SuvariOrchestrator:
         self.exploiter_agent = ExploiterAgent("exploiter", self.llm, self.ws, self.tools, verbose)
         self.reporter = ReportGenerator(self.ws, self.target_url)
 
-        self.context = {"target_url": target_url, "fast": fast, "source_dir": source_dir}
+        self.context = {"target_url": target_url, "fast": fast, "source_dir": source_dir, "mode": scan_mode}
 
     def run(self):
         """Start (or resume) the pipeline with P-E-R adaptive execution."""
@@ -206,7 +209,24 @@ class SuvariOrchestrator:
         elif phase_id == "analyze":
             self.context["analysis"] = self.analyzer_agent.run(self.context)
             summary = self.context.get("analysis", {}).get("summary", {})
+            vulnerabilities = self.context.get("analysis", {}).get("vulnerabilities", [])
             self.logger.info("phase", f"Analysis complete: {summary.get('total', 0)} findings")
+
+            # Show live findings in interactive/guided mode
+            if self.mode.show_live_findings and vulnerabilities:
+                print(f"\n  {'='*50}")
+                print(f"  📋 LIVE FINDINGS ({len(vulnerabilities)})")
+                for v in vulnerabilities:
+                    show_finding(v)
+                print(f"  {'='*50}\n")
+
+                # Ask before exploit in interactive mode
+                if self.mode.ask_before_exploit:
+                    if ask_user("Proceed with exploitation?", default=True):
+                        self.logger.info("phase", "User approved exploitation")
+                    else:
+                        self.logger.info("phase", "User declined exploitation")
+                        return  # Skip exploit phase
 
         elif phase_id == "exploit":
             self.context["exploit_results"] = self.exploiter_agent.run(self.context)
