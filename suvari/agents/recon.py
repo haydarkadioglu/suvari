@@ -4,14 +4,24 @@ Shows real-time tool execution with elapsed time.
 """
 
 import time
+from urllib.parse import urlparse, urlunparse
 from .base import BaseAgent, fmt_time
+
+
+def clean_url(url: str) -> str:
+    """Remove URL fragments (#) that break CLI tools."""
+    parsed = urlparse(url)
+    if parsed.fragment:
+        parsed = parsed._replace(fragment="")
+        return urlunparse(parsed)
+    return url
 
 
 class ReconAgent(BaseAgent):
     """Gathers target information: technology, ports, headers."""
 
     def run(self, context: dict) -> dict:
-        url = context["target_url"]
+        url = clean_url(context["target_url"])
         self.log(f"🌐 Reconnaissance: {url}")
 
         results = {}
