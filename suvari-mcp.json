@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "suvari": {
+      "command": "python3",
+      "args": ["/home/kali/Desktop/suvari/suvari_mcp.py"],
+      "description": "Suvari — AI-powered web and server pentester",
+      "timeout": 300,
+      "disabled": false
+    }
+  }
+}
