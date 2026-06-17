@@ -7,7 +7,7 @@ import time
 from urllib.parse import urlparse, urlunparse
 from .base import BaseAgent, fmt_time
 from ..prompt_loader import PromptLoader
-from ..mode import ScanMode, ask_user
+from ..mode import ScanMode, ask_question
 
 
 def clean_url(url: str) -> str:
@@ -103,7 +103,7 @@ class ScannerAgent(BaseAgent):
             elif max_time > 30 and mode.suggestions_enabled:
                 self.log(f"  {tool_name} — {reason[:80]}")
                 self.log(f"     (estimated: up to {max_time}s)")
-                if not ask_user(f"Run {tool_name} (~{max_time}s)?", default=False):
+                if not ask_question(f"Run {tool_name} (~{max_time}s)?", default=False):
                     self.log(f"     Skipped")
                     results[tool_name] = "(skipped)"
                     results[f"{tool_name}_time"] = "skipped"

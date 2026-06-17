@@ -19,7 +19,7 @@ from .state import PipelineState
 from .core import Planner, Reflector
 from .prompt_loader import PromptLoader
 from .scan_logger import ScanLogger
-from .mode import ScanMode, ask_user, show_finding, ask_suggestions, show_recon_summary
+from .mode import ScanMode, ask_question, show_finding, chat_after_recon, chat_after_scan, chat_before_exploit
 
 console = Console()
 
@@ -203,13 +203,9 @@ class SuvariOrchestrator:
             self.context["recon_results"] = self.recon_agent.run(self.context)
             self.logger.info("phase", "Recon complete")
 
-            # Ask user for suggestions (guided/interactive mode)
+            # Ask user for suggestions after recon
             if self.mode.suggestions_enabled:
-                show_recon_summary(self.context.get("recon_results", {}))
-                suggestion = ask_suggestions(
-                    "Any areas to focus on?",
-                    "e.g.: check /api, try SQL injection on login, look for JWT tokens"
-                )
+                suggestion = chat_after_recon(self.context.get("recon_results", {}), self.mode.suggestions_enabled)
                 if suggestion:
                     self.context["user_suggestions"] = suggestion
                     self.logger.info("phase", f"User suggestion: {suggestion}")
@@ -219,6 +215,13 @@ class SuvariOrchestrator:
             scan_ok = self.context.get("scan_results", {})
             tools_run = [k for k in scan_ok if not k.endswith("_time") and not k.endswith("_status") and not k.startswith("_")]
             self.logger.info("phase", f"Scan complete: {tools_run}")
+
+            # Chat after scan (guided/interactive)
+            if self.mode.suggestions_enabled:
+                suggestion = chat_after_scan(scan_ok, self.mode.suggestions_enabled)
+                if suggestion:
+                    existing = self.context.get("user_suggestions", "")
+                    self.context["user_suggestions"] = (existing + "\n" + suggestion) if existing else suggestion
 
         elif phase_id == "analyze":
             # Include user suggestions in analysis context
@@ -230,26 +233,22 @@ class SuvariOrchestrator:
             vulnerabilities = self.context.get("analysis", {}).get("vulnerabilities", [])
             self.logger.info("phase", f"Analysis complete: {summary.get('total', 0)} findings")
 
-            # Show live findings
+            # Show findings
             if vulnerabilities:
                 print(f"\n  {'='*50}")
-                print(f"  📋 FINDINGS ({len(vulnerabilities)})")
-                for v in vulnerabilities:
-                    show_finding(v)
+                print(f"  FINDINGS ({len(vulnerabilities)})")
+                for i, v in enumerate(vulnerabilities, 1):
+                    show_finding(v, i)
                 print(f"  {'='*50}\n")
 
-            # Ask user for suggestions after analysis
+            # Chat before exploit (guided/interactive)
             if self.mode.suggestions_enabled:
-                suggestion = ask_suggestions(
-                    "Any specific exploit to try?",
-                    "e.g.: try sqlmap on the search endpoint, check if admin:admin works"
-                )
+                suggestion = chat_before_exploit(vulnerabilities, self.mode.suggestions_enabled)
                 if suggestion:
-                    self.context["user_suggestions"] = (self.context.get("user_suggestions", "")
-                                                        + "\n" + suggestion)
-                    self.logger.info("phase", f"User exploit suggestion: {suggestion}")
+                    existing = self.context.get("user_suggestions", "")
+                    self.context["user_suggestions"] = (existing + "\n" + suggestion) if existing else suggestion
 
-                if not ask_user("Proceed with exploitation?", default=True):
+                if not ask_question("Proceed with exploitation?", default=True):
                     self.logger.info("phase", "User declined exploitation")
                     return
 
