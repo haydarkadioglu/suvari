@@ -152,3 +152,29 @@ def chat():
     banner()
     session = ChatSession()
     session.run()
+
+
+@app.command()
+def bb(
+    url: str = typer.Argument(..., help="Target URL (e.g. https://example.com)"),
+    output: Optional[Path] = typer.Option(None, "--output", "-o", help="Output directory"),
+):
+    """🎯 Bug bounty recon — subdomains, URLs, params, tech"""
+    banner()
+    console.print(f"[bold]🎯 Target:[/bold] {url}")
+    from .agents.bugbounty import BugBountyAgent
+    from .llm import LLMClient
+    from .workspace import Workspace
+    from .tools.runner import ToolRunner
+    cfg = load_config()
+    llm = LLMClient(provider=cfg.get("provider", "deepseek"), model=cfg.get("model"))
+    ws = Workspace(f"bb-{url.strip('/').split('/')[-1]}", output)
+    tr = ToolRunner()
+    agent = BugBountyAgent("bugbounty", llm, ws, tr)
+    results = agent.run({"target_url": url})
+    console.print(f"\n[green]Done![/green]")
+    console.print(f"  Subdomains: {len(results.get('subdomains', []))}")
+    console.print(f"  URLs: {len(results.get('urls', []))}")
+    console.print(f"  Params: {len(results.get('params', []))}")
+    console.print(f"  Tech: {len(results.get('technology', []))}")
+    console.print(f"[dim]Output: {ws.path}[/dim]")

@@ -54,18 +54,58 @@ class ToolRunner:
     def available_tools(self) -> dict:
         """List available security tools on the system."""
         tools = {
-            "nmap": "Port scanning",
-            "whatweb": "Technology detection",
-            "nuclei": "Vulnerability scanner",
-            "nikto": "Web server scanner",
+            # Network scanning
+            "nmap": "Port scanning & service detection",
+            "masscan": "High-speed port scanning",
+            "rustscan": "Ultra-fast port scanner",
+            # Web discovery
+            "whatweb": "Technology fingerprinting",
+            "httpx": "HTTP probing & tech detection",
             "gobuster": "Directory/subdomain brute force",
-            "ffuf": "Fuzzing",
-            "sqlmap": "SQL injection",
+            "ffuf": "Web fuzzing",
+            "feroxbuster": "Recursive content discovery",
+            "dirb": "Web content scanner",
+            "dirsearch": "Advanced directory discovery",
+            "katana": "Web crawler with JS support",
+            "hakrawler": "Fast web endpoint discovery",
+            # Vulnerability scanning
+            "nuclei": "Vulnerability scanner (4000+ templates)",
+            "nikto": "Web server scanner",
             "wpscan": "WordPress scanner",
-            "curl": "HTTP requests",
-            "subfinder": "Subdomain discovery",
-            "httpx": "HTTP probing",
-            "dnsx": "DNS probing",
-            "katana": "Web crawler",
+            "jaeles": "Advanced vulnerability scanner",
+            "dalfox": "XSS scanner with DOM analysis",
+            "xsstrike": "XSS detection suite",
+            # Exploitation
+            "sqlmap": "SQL injection automation",
+            "hydra": "Password brute force (50+ protocols)",
+            "john": "John the Ripper password cracker",
+            "hashcat": "GPU-accelerated password recovery",
+            "netexec": "Network exploitation framework",
+            "metasploit": "Metasploit framework",
+            # OSINT & recon
+            "subfinder": "Passive subdomain discovery",
+            "amass": "Subdomain enumeration & OSINT",
+            "theharvester": "Email/subdomain OSINT",
+            "dnsenum": "DNS enumeration",
+            "dnsrecon": "DNS reconnaissance",
+            "fierce": "DNS reconnaissance",
+            "gau": "Get All URLs from sources",
+            "waybackurls": "Historical URL discovery",
+            "arjun": "HTTP parameter discovery",
+            "paramspider": "Parameter mining",
+            # SMB & Windows
+            "enum4linux": "SMB enumeration",
+            "smbmap": "SMB share enumeration",
+            "responder": "LLMNR/NBT-NS poisoning",
+            "rpcclient": "RPC null session testing",
+            # Cloud
+            "trivy": "Container/filesystem vulnerability scanner",
+            "prowler": "AWS security assessment",
+            # Web application
+            "wafw00f": "WAF fingerprinting",
+            "dotdotpwn": "Directory traversal fuzzing",
+            # Utilities
+            "curl": "HTTP requests & scripting",
+            "jq": "JSON processor",
         }
         return {name: desc for name, desc in tools.items() if self.check_tool(name)}
