@@ -84,7 +84,7 @@ class BugBountyAgent(BaseAgent):
                 if line and not line.startswith("("):
                     found.add(line.lower())
 
-        # Method 2: crt.sh Certificate Transparency logs (tight timeout)
+        # Method 2: crt.sh Certificate Transparency logs
         try:
             import json
             resp = self.tools.run(
@@ -102,7 +102,24 @@ class BugBountyAgent(BaseAgent):
         except Exception:
             pass
 
-        # Method 3: dnsenum (tight timeout)
+        # Method 3: AlienVault OTX (free, no API key)
+        try:
+            import json
+            resp = self.tools.run(
+                ["curl", "-s", "--max-time", "10",
+                 f"https://otx.alienvault.com/api/v1/indicators/domain/{domain}/passive_dns"],
+                timeout=15
+            )
+            if resp and not resp.startswith("("):
+                data = json.loads(resp)
+                for entry in data.get("passive_dns", []):
+                    host = entry.get("hostname", "").strip().lower()
+                    if host and host.endswith(domain) and host != domain:
+                        found.add(host)
+        except Exception:
+            pass
+
+        # Method 4: dnsenum (tight timeout)
         if self.tools.check_tool("dnsenum"):
             out = self.tools.run(["dnsenum", "--enum", domain, "--noreverse", "--timeout", "5"], timeout=20)
             for line in out.splitlines()[:50]:
@@ -110,7 +127,7 @@ class BugBountyAgent(BaseAgent):
                 if line and not line.startswith("(") and domain in line.lower():
                     found.add(line.lower().split()[-1])
 
-        # Method 3: Fast DNS resolution via dig (faster than socket)
+        # Method 5: DNS resolution via dig (parallel)
         common = ["www", "mail", "ftp", "admin", "api", "blog", "dev", "test",
                    "webmail", "remote", "vpn", "shop", "app", "beta", "m",
                    "ns1", "ns2", "mx", "cpanel", "dns", "server",
