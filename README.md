@@ -14,7 +14,7 @@
 [![Scan](https://img.shields.io/badge/Scan-Causal%20Chain-orange.svg)](https://github.com/haydarkadioglu/suvari)
 [![Stars](https://img.shields.io/github/stars/haydarkadioglu/suvari?style=social)](https://github.com/haydarkadioglu/suvari)
 
-**Suvari** — AI-powered black-box web + server pentester.  
+# **Suvari** — AI-Powered Black-Box **Web & Server Pentester**
 68 Kali tools • MCP support • Multi-LLM • Causal chain scanning.
 
 > **DISCLAIMER:** For authorized testing only. Unauthorized use is illegal. By using this software you agree to use it responsibly.
