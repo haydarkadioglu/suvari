@@ -96,6 +96,11 @@ def scan(
         server_scan=server,
     )
     orchestrator.run()
+    # Save pointer to last scan
+    try:
+        (Path("output") / ".last").write_text(str(ws.path))
+    except Exception:
+        pass
 
 
 @app.command()
@@ -187,7 +192,8 @@ def bb(
 
 @app.command()
 def attack(
-    scan_dir: Path = typer.Argument(..., help="Scan output directory (from previous scan)"),
+    scan_dir: Optional[Path] = typer.Argument(None, help="Scan output directory (from previous scan)"),
+    last: bool = typer.Option(False, "--last", "-l", help="Use most recent scan"),
     provider: str = typer.Option("openai", "--provider", "-p", help="LLM provider"),
     model: Optional[str] = None,
 ):
@@ -198,6 +204,15 @@ def attack(
     from .workspace import Workspace
     from .tools.runner import ToolRunner
     from .report import ReportGenerator
+
+    # Resolve scan directory
+    if last or not scan_dir:
+        last_file = Path("output") / ".last"
+        if last_file.exists():
+            scan_dir = Path(last_file.read_text().strip())
+        elif not scan_dir:
+            console.print("[red]Specify a scan directory or use --last[/red]")
+            raise typer.Exit(1)
 
     # Read findings from scan output
     findings_file = scan_dir / "analysis" / "findings.json"
@@ -285,6 +300,21 @@ Info: whatweb, wafw00f, curl | Crack: john, hashcat | OSINT: amass, theharvester
 
     console.print(f"\n[green]Attack complete.[/green] [dim]{ws.path}[/dim]")
 
+
+@app.command()
+def last():
+    """Show last scan report summary"""
+    last_file = Path("output") / ".last"
+    if not last_file.exists():
+        console.print("[yellow]No scan has been run yet[/yellow]")
+        return
+    scan_dir = Path(last_file.read_text().strip())
+    report_file = scan_dir / "report.md"
+    if report_file.exists():
+        console.print(f"[bold]Last scan:[/bold] {scan_dir.name}")
+        console.print(report_file.read_text()[:2000])
+    else:
+        console.print(f"[yellow]No report found in {scan_dir}[/yellow]")
 
 @app.command()
 def help():
