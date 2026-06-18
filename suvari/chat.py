@@ -24,7 +24,8 @@ SYSTEM_PROMPT = """You are Suvari, an AI-powered pentesting assistant. Be concis
 
 For CTF: describe what to do, suggest specific commands.
 For scan results: list findings briefly, no narrative.
-For general questions: direct answer, no fluff.
+For report queries: read the actual files, don't describe what you would do.
+For general questions: direct answer, no fluff. Never say "I'll check" - actually do it.
 
 Respond in the same language as the user."""
 
@@ -103,6 +104,10 @@ class ChatSession:
         if t in ("history", "scans", "list"):
             self._list_scans()
             return
+        if any(kw in t for kw in ["rapor", "report", "show results", "findings", "bulgular"]):
+            if self.last_scan_dir:
+                self._show_report()
+                return
         if t.startswith("check "):
             self._cmd_check(text)
             return
