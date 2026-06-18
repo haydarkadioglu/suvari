@@ -96,9 +96,19 @@ class ChatSession:
     def _handle_input(self, text: str):
         # Detect scan directory path first (handle quotes)
         clean_text = text.strip().strip("'\"")
+        t = clean_text.lower()
         path_match = re.search(r'(/home/[^\s]*output/[^\s]+)', clean_text)
+
+        # If path provided AND asking for action (exploit, test, dene, sız), run exploitation
         if path_match:
             self.last_scan_dir = Path(path_match.group(1))
+            # Check if user wants action, not just summary
+            action_keywords = ["sız", "exploit", "dene", "test et", "kır", "yap", "gir", "atak", "hack", "bypass"]
+            if any(kw in t for kw in action_keywords):
+                self._cmd_attack_from_dir(text)
+                return
+
+        # Load existing findings into context for AI
 
         # Load existing findings into context for AI
         scan_context = ""
@@ -281,6 +291,39 @@ class ChatSession:
             url = "https://" + url
         ws = Workspace("recon")
         ReconAgent("recon", self.llm, ws, self.tools).run({"target_url": url})
+
+    def _cmd_attack_from_dir(self, text: str):
+        """Actively exploit findings from scan directory using P-E-R."""
+        from .agents.exploiter import ExploiterAgent
+        from .workspace import Workspace
+
+        if not self.last_scan_dir:
+            console.print("[yellow]No scan directory specified[/yellow]")
+            return
+
+        findings_file = self.last_scan_dir / "analysis" / "findings.json"
+        if not findings_file.exists():
+            console.print("[yellow]No findings.json in scan directory[/yellow]")
+            return
+
+        import json
+        findings = json.loads(findings_file.read_text())
+        vulns = findings.get("vulnerabilities", [])
+        if not vulns:
+            console.print("[yellow]No vulnerabilities found[/yellow]")
+            return
+
+        console.print(f"[bold]Exploiting {len(vulns)} findings...[/bold]")
+        ws = Workspace(f"attack-{self.last_scan_dir.name}")
+        agent = ExploiterAgent("exploit", self.llm, ws, self.tools)
+        context = {
+            "target_url": vulns[0].get("location", "").split("/")[0] if vulns else "https://example.com",
+            "analysis": findings,
+        }
+        results = agent.run(context)
+        successes = sum(1 for r in results.get("exploits", []) if r.get("success"))
+        console.print(f"[green]Done: {successes} confirmed[/green]")
+        self.history.append({"role": "assistant", "content": f"Exploitation: {successes}/{len(vulns)} confirmed"})
 
     def _show_report(self):
         if not self.last_scan_dir:
