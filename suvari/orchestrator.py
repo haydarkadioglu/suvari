@@ -224,6 +224,8 @@ class SuvariOrchestrator:
                 except Exception as e:
                     pass
 
+            scan_results = self.context.get("scan_results", {})
+
             self.logger.info("phase", f"Scan complete")
 
         elif phase_id == "analyze":
@@ -232,6 +234,15 @@ class SuvariOrchestrator:
             self.context["analysis"] = self.analyzer_agent.run(self.context)
             analysis = self.context.get("analysis", {})
             vulnerabilities = analysis.get("vulnerabilities", [])
+
+            # Delegate exploitation for each CRITICAL/HIGH finding
+            for vuln in vulnerabilities[:3]:
+                if vuln.get("severity", "") in ("CRITICAL", "HIGH"):
+                    from .agents.exploiter import ExploiterAgent
+                    from .workspace import Workspace
+                    sub_ws = Workspace(f"delegated-{vuln.get('type','')[:20]}")
+                    sub = ExploiterAgent("delegated", self.llm, sub_ws, self.tools)
+                    sub.run({"target_url": self.target_url, "analysis": {"vulnerabilities": [vuln]}})
 
             # Recalculate summary from actual vulnerability list
             sev_count = {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0}
