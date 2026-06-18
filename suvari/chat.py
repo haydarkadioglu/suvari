@@ -45,12 +45,11 @@ gobuster dir -u https://example.com -w /usr/share/wordlists/dirb/common.txt
 ```
 
 RULES:
-- Run 3-5 different tests per round using the RIGHT tools. Don't just use curl.
-- If given existing scan findings or a report: read and summarize. Don't re-scan.
-- If user asks "what are the findings" or "özetle" or "summary": read the report.md or findings.json and summarize the existing data. Don't run tools.
-- Keep digging until you've checked everything relevant.
-- Final response: concise summary.
-- Never say "I'll check" - run the tools.
+- First RESPOND to the user's question directly. Then run tools if needed.
+- If user asks "what can we do" or "ne var" or asks for strategy: list possible attack vectors first, don't immediately run tools.
+- Only run tools when: testing a specific finding, verifying a hypothesis, or the user asks you to.
+- For existing reports: read and summarize. Don't re-scan.
+- Be concise. Final response: 2-3 sentences.
 - Respond in same language as user.
 """
 
