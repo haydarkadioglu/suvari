@@ -6,6 +6,14 @@
 |____/ \__,_| \_/ \__,_|_|  |_|
 ```
 
+[![Python](https://img.shields.io/badge/Python-3.8%2B-blue.svg)](https://www.python.org/)
+[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![Tools](https://img.shields.io/badge/Tools-68%20Kali-brightgreen.svg)](https://github.com/haydarkadioglu/suvari)
+[![MCP](https://img.shields.io/badge/MCP-Compatible-purple.svg)](https://github.com/haydarkadioglu/suvari)
+[![Agent](https://img.shields.io/badge/AI%20Agents-5%2B-purple.svg)](https://github.com/haydarkadioglu/suvari)
+[![Scan](https://img.shields.io/badge/Scan-Causal%20Chain-orange.svg)](https://github.com/haydarkadioglu/suvari)
+[![Stars](https://img.shields.io/github/stars/haydarkadioglu/suvari?style=social)](https://github.com/haydarkadioglu/suvari)
+
 **Suvari** — AI-powered black-box web + server pentester.  
 68 Kali tools • MCP support • Multi-LLM • Causal chain scanning.
 
