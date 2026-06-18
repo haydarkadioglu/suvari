@@ -92,49 +92,43 @@ class ChatSession:
         # If path provided AND asking for action (exploit, test, dene, sız), run exploitation
         if path_match:
             self.last_scan_dir = Path(path_match.group(1))
-            # Check if user wants action, not just summary
             action_keywords = ["sız", "exploit", "dene", "test et", "kır", "yap", "gir", "atak", "hack", "bypass"]
             if any(kw in t for kw in action_keywords):
                 self._cmd_attack_from_dir(text)
                 return
 
-        # Load existing findings into context for AI
-
-        # Load existing findings into context for AI
+        # Load existing findings into context for AI - try multiple files
         scan_context = ""
         if self.last_scan_dir:
             findings_file = self.last_scan_dir / "analysis" / "findings.json"
             report_file = self.last_scan_dir / "report.md"
 
-            # First try findings.json (structured data)
             if findings_file.exists():
                 try:
                     import json
                     data = json.loads(findings_file.read_text())
                     vulns = data.get("vulnerabilities", [])
                     if vulns:
-                        vuln_lines = []
-                        for v in vulns[:20]:
-                            sev = v.get("severity", "?")
-                            typ = v.get("type", "?")
-                            loc = v.get("location", "?")
-                            desc = v.get("description", "")
-                            vuln_lines.append(f"[{sev}] {typ} @ {loc}")
-                            if desc:
-                                vuln_lines.append(f"      {desc[:150]}")
-                        scan_context = "Existing findings from scan (COMPLETED):\n" + "\n".join(vuln_lines)
-                        scan_context += "\n\nThe scan completed successfully. Base your answers on these actual findings."
+                        lines = []
+                        for v in vulns[:15]:
+                            lines.append(f"[{v.get('severity','?')}] {v.get('type','?')} @ {v.get('location','?')}")
+                            if v.get("description"):
+                                lines.append(f"  {v['description'][:150]}")
+                        scan_context = "SCAN FINDINGS:\n" + "\n".join(lines)
                 except Exception:
                     pass
 
-            # Fallback: read report.md
             if not scan_context and report_file.exists():
                 text = report_file.read_text()
-                lines = text.split("\n")
-                summary = [l for l in lines if any(x in l for x in ["Critical", "High", "Medium", "Low", "Total", "[VULN]", "[HIGH]", "[CRITICAL]"])]
-                if summary:
-                    scan_context = "Existing scan report (COMPLETED):\n" + "\n".join(summary[:20])
-                    scan_context += "\n\nIgnore _total_time or chain_error. Scan completed."
+                scan_context = "REPORT:\n" + text[:2000]
+
+            if not scan_context:
+                files = list(self.last_scan_dir.rglob("*"))
+                if files:
+                    file_list = "\n".join([f"  {f.relative_to(self.last_scan_dir)} ({f.stat().st_size}b)" for f in files[:20]])
+                    scan_context = f"SCAN DIRECTORY ({self.last_scan_dir.name}):\n{file_list}\n\nRead these files to analyze."
+
+        self._scan_context = scan_context
 
         t = clean_text.lower()
 
@@ -170,8 +164,8 @@ class ChatSession:
         self.history.append({"role": "user", "content": user_input})
         avail = ", ".join(sorted(self.tools.available_tools().keys()))
         context = f"Available tools: {avail}"
-        if scan_context:
-            context += f"\n\n{scan_context}"
+        if hasattr(self, '_scan_context') and self._scan_context:
+            context += f"\n\n{self._scan_context}"
 
         # Detect scan directory in input
         path_match = re.search(r'(/home/[^\s]+output/[^\s]+)', user_input)
