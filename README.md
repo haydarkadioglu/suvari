@@ -1,78 +1,68 @@
-# Suvari
+```
+ ____                        _ 
+/ ___| _   ___   ____ _ _ __(_)
+\___ \| | | \ \ / / _` | '__| |
+ ___) | |_| |\ V / (_| | |  | |
+|____/ \__,_| \_/ \__,_|_|  |_|
+```
 
-> **DISCLAIMER:** Suvari is a security testing tool designed for authorized penetration testing and educational purposes only. You must have explicit written permission from the target owner before scanning any system. Unauthorized use of this tool against systems you do not own or have permission to test is illegal. The authors assume no liability and are not responsible for any misuse or damage caused by this program. By using this software, you agree to use it responsibly and in compliance with all applicable laws.
+**Suvari** — AI-powered black-box web + server pentester.  
+68 Kali tools • MCP support • Multi-LLM • Causal chain scanning.
 
-AI-powered black-box web + server pentester with MCP support.
+> **DISCLAIMER:** For authorized testing only. Unauthorized use is illegal. By using this software you agree to use it responsibly.
 
 ## Quick Start
 
 ```bash
 pip install -r requirements.txt
-python suvari.py configure          # One-time setup
+python suvari.py configure
 python suvari.py scan https://example.com
 ```
 
 ## Features
 
-- **Tree-based scanning** — AI decides next steps, drills deeper on findings, fallback tools on failure
-- **27+ Kali tools** — nmap, nuclei, gobuster, ffuf, sqlmap, hydra, enum4linux, etc.
-- **Browser agent** — login, default creds, self-registration, DOM XSS, screenshots
-- **CVE intelligence** — version-based CVE lookup + AI exploit generation
-- **JWT analysis** — decode, algorithm confusion, weak secret brute force
+- **68 Kali tools** — nmap, nuclei, sqlmap, hydra, gobuster, masscan, impacket, searchsploit, msfvenom...
+- **Causal chain scanning** — each step feeds into the next, AI decides adaptively
+- **P-E-R chat** — AI plans, executes tools, reflects on results
+- **Browser agent** — login, DOM XSS, self-registration, screenshots
+- **Attack chains** — connects findings into exploit chains
+- **Agent delegation** — scanner spawns exploiters for each finding
+- **CVE intelligence** — version-based lookup + exploit generation
+- **JWT analysis** — decode, algorithm confusion, brute force
+- **Failure recovery** — L0-L5 classification, automatic fallback tools
 - **Multi-LLM** — OpenAI, Anthropic, DeepSeek, Gemini, OpenRouter, Ollama
-- **Server scan** (`-s`) — full port scan + service detection, SSH/FTP/SMB/DB checks
-- **White-box** (`-r`) — source code analysis alongside live testing
-- **Chat mode** — interactive conversation + CTF challenge solving
-- **MCP server** — compatible with Claude Desktop, Cursor, VS Code Copilot
-- **Failure recovery** — L0-L5 failure attribution, automatic tool fallbacks
-- **Bug bounty workflow** — subdomain/URL/parameter discovery
-- **No Docker required** — uses existing Kali tools directly
-
-## Documentation
-
-Documentation: [docs/index.md](docs/index.md) — installation, commands, MCP setup, architecture.
+- **MCP server** — Claude Desktop, Cursor, VS Code Copilot
+- **Bug bounty** — subdomain/URL/parameter discovery
 
 ## Commands
 
 ```
-configure   Interactive setup
-scan        Full scan (tree-based, default mode)
+configure   Setup provider, model, API key
+scan        Full smart scan (3-phase adaptive)
 recon       Quick reconnaissance
-attack      Exploit previous scan findings
-bb          Bug bounty workflow
+attack      P-E-R exploitation of previous findings
+bb          Bug bounty recon
 chat        Interactive chat + CTF
-report      Show previous report
-list        List past scans
+report      Show report
+list        Past scans
 ```
 
-## MCP Server
+## MCP
 
 ```bash
 python suvari_mcp.py
 ```
+Tools: scan_target, recon_target, run_tool, list_available_tools, get_scan_report, analyze_ctf.
 
-Exposes 6 tools for Claude Desktop, Cursor, Copilot: scan_target, recon_target, run_tool, list_available_tools, get_scan_report, analyze_ctf.
+## Quick Links
 
-## Architecture
+- [Installation](docs/installation.md)
+- [Commands](docs/commands.md)
+- [MCP Setup](docs/mcp.md)
+- [Architecture](docs/architecture.md)
+- [Providers](docs/providers.md)
 
-```
-suvari/
-├── suvari.py               # CLI
-├── suvari_mcp.py           # MCP server
-├── suvari/
-│   ├── cli.py / chat.py / mcp_server.py
-│   ├── llm.py / orchestrator.py / chain.py
-│   ├── failure.py / knowledge.py / state.py
-│   ├── browser.py          # Playwright automation
-│   ├── cve_intel.py        # CVE + exploit generation
-│   ├── jwt_analysis.py     # JWT analysis
-│   ├── agents/ (recon, scanner, analyzer, exploiter, bugbounty)
-│   ├── tools/runner.py     # Subprocess + caching
-│   └── prompts/            # Jinja2 templates
-└── requirements.txt
-```
-
-Inspired by [Shannon](https://github.com/KeygraphHQ/shannon), [PentAGI](https://github.com/vxcontrol/pentagi), [LuaN1aoAgent](https://github.com/SanMuzZzZz/LuaN1aoAgent), and [HexStrike AI](https://github.com/0x4m4/hexstrike-ai).
+Inspired by [Shannon](https://github.com/KeygraphHQ/shannon), [PentAGI](https://github.com/vxcontrol/pentagi), [LuaN1aoAgent](https://github.com/SanMuzZzZz/LuaN1aoAgent), [HexStrike AI](https://github.com/0x4m4/hexstrike-ai).
 
 ## License
 
