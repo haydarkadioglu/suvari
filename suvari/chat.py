@@ -98,6 +98,29 @@ class ChatSession:
         if path_match:
             self.last_scan_dir = Path(path_match.group(1))
 
+        # Load existing findings into context for AI
+        scan_context = ""
+        if self.last_scan_dir:
+            report_file = self.last_scan_dir / "report.md"
+            findings_file = self.last_scan_dir / "analysis" / "findings.json"
+            if report_file.exists():
+                report_text = report_file.read_text()
+                # Extract summary and findings sections
+                lines = report_text.split("\n")
+                summary_lines = [l for l in lines if any(x in l for x in ["Critical", "High", "Medium", "Low", "Total", "Finding", "[VULN]", "[HIGH]", "[MEDIUM]", "[LOW]"])]
+                if summary_lines:
+                    scan_context = "Existing scan report:\n" + "\n".join(summary_lines[:20]) + "\n\nBase your answer on these findings. Don't suggest things already tested."
+            if findings_file.exists():
+                import json
+                try:
+                    data = json.loads(findings_file.read_text())
+                    vulns = data.get("vulnerabilities", [])
+                    if vulns:
+                        vuln_text = "\n".join([f"  [{v.get('severity','?')}] {v.get('type','?')} @ {v.get('location','?')}" for v in vulns[:10]])
+                        scan_context += f"\nConfirmed vulnerabilities:\n{vuln_text}"
+                except Exception:
+                    pass
+
         t = clean_text.lower()
 
         if t.startswith("scan "):
@@ -124,13 +147,16 @@ class ChatSession:
         if t in ("history", "scans", "list"):
             self._list_scans()
             return
-        self._per_loop(text)
+        # P-E-R with existing scan context
+        self._per_loop(text, scan_context=scan_context)
 
-    def _per_loop(self, user_input: str, max_rounds: int = 20):
+    def _per_loop(self, user_input: str, max_rounds: int = 20, scan_context: str = ""):
         """P-E-R loop. Loads scan findings if path provided. Saves results to scan dir."""
         self.history.append({"role": "user", "content": user_input})
         avail = ", ".join(sorted(self.tools.available_tools().keys()))
         context = f"Available tools: {avail}"
+        if scan_context:
+            context += f"\n\n{scan_context}"
 
         # Detect scan directory in input
         path_match = re.search(r'(/home/[^\s]+output/[^\s]+)', user_input)
