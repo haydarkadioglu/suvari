@@ -183,67 +183,42 @@ class SuvariOrchestrator:
             self.logger.info("phase", "Recon complete")
 
         elif phase_id == "scan":
-            # Browser-based analysis (always runs)
-            # Parallel: Browser + Scanner + CVE + JWT
+            console.print("  Smart scan: adaptive multi-stage")
             from concurrent.futures import ThreadPoolExecutor, as_completed
+
+            # Stage 1: Quick recon + tech detection (parallel)
+            stage1 = {}
             pool_size = min(self.context.get("parallel", 3), 5)
-            scan_futures = {}
-
             with ThreadPoolExecutor(max_workers=pool_size) as pool:
-                # Parallel tasks
-                scan_futures[pool.submit(self._run_browser)] = "browser"
-                scan_futures[pool.submit(self._run_cve_intel)] = "cve"
-                scan_futures[pool.submit(self._run_scanner)] = "scanner"
-                # Causal chain runs alongside (if chain_mode)
-                if self.chain_mode:
-                    scan_futures[pool.submit(self._run_causal_chain)] = "chain"
-
-                for fut in as_completed(scan_futures):
-                    name = scan_futures[fut]
+                futs = {
+                    pool.submit(self._run_browser): "browser",
+                    pool.submit(self._run_cve_intel): "cve",
+                }
+                for f in as_completed(futs):
+                    n = futs[f]
                     try:
-                        result = fut.result()
-                        if name == "browser":
-                            self.context["browser_info"] = result
-                        elif name == "cve":
-                            if result:
-                                self.context["cve_findings"] = result
-                        elif name == "scanner":
-                            self.context["scan_results"] = result
-                            # Delegate exploitation chain for findings
-                            if result and isinstance(result, dict):
-                                vulns = result.get("vulnerabilities", [])
-                                for vuln in vulns[:3]:
-                                    sev = vuln.get("severity", "")
-                                    if sev in ("CRITICAL", "HIGH"):
-                                        from .agents.exploiter import ExploiterAgent
-                                        from .workspace import Workspace
-                                        sub_ws = Workspace(f"delegated-{vuln.get('type','')[:20]}")
-                                        sub = ExploiterAgent("delegated", self.llm, sub_ws, self.tools)
-                                        sub.run({"target_url": self.target_url, "analysis": {"vulnerabilities": [vuln]}})
-                        elif name == "chain":
-                            if result and result.get("vulnerabilities"):
-                                self.context.setdefault("chain_findings", []).extend(result["vulnerabilities"])
+                        r = f.result()
+                        if n == "browser": self.context["browser_info"] = r
+                        elif n == "cve" and r: self.context["cve_findings"] = r
                     except Exception as e:
-                        console.print(f"  {name} error: {e}")
+                        console.print(f"  {n} error: {e}")
 
-            # JWT analysis (depends on recon, quick)
-            all_text = str(self.context.get("recon_results", {}))
-            import re
-            jwt_matches = re.findall(r'eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+', all_text)
-            if jwt_matches:
-                try:
-                    from .jwt_analysis import analyze_jwt
-                    for token in jwt_matches[:3]:
-                        analysis = analyze_jwt(token)
-                        if analysis.get("findings"):
-                            self.context["jwt_findings"] = analysis["findings"]
-                            console.print(f"  JWT Analysis: {analysis['summary']}")
-                except Exception as e:
-                    pass
+            # Stage 2: AI-driven adaptive scanning
+            self.context["scan_results"] = self._run_smart_scan()
 
+            # Stage 3: Delegate exploitation
             scan_results = self.context.get("scan_results", {})
+            if scan_results and isinstance(scan_results, dict):
+                vulns = scan_results.get("vulnerabilities", [])
+                for vuln in vulns[:3]:
+                    if vuln.get("severity") in ("CRITICAL", "HIGH"):
+                        from .agents.exploiter import ExploiterAgent
+                        from .workspace import Workspace
+                        sub_ws = Workspace(f"delegated-{vuln.get('type','')[:20]}")
+                        sub = ExploiterAgent("delegated", self.llm, sub_ws, self.tools)
+                        sub.run({"target_url": self.target_url, "analysis": {"vulnerabilities": [vuln]}})
 
-            self.logger.info("phase", f"Scan complete")
+            self.logger.info("phase", "Scan complete")
 
         elif phase_id == "analyze":
             if self.context.get("user_suggestions"):
@@ -395,6 +370,41 @@ class SuvariOrchestrator:
         except Exception as e:
             console.print(f"  Chain error: {e}")
             return {}
+
+    def _run_smart_scan(self) -> dict:
+        """AI-driven adaptive scanning: plan → execute → analyze → repeat."""
+        from .agents.scanner import ScannerAgent
+        from .chain import CausalChain
+        console = Console()
+
+        # Phase A: Run standard scanner
+        console.print("  Phase A: AI-driven tool selection")
+        scanner = ScannerAgent("scanner", self.llm, self.ws, self.tools)
+        scan_results = scanner.run(self.context) or {}
+
+        # Phase B: Causal chain for deeper analysis
+        if self.chain_mode:
+            console.print("  Phase B: Causal graph analysis")
+            try:
+                chain = CausalChain(self.target_url, self.llm, self.tools, self.ws, max_steps=6)
+                chain_results = chain.run()
+                if chain_results.get("vulnerabilities"):
+                    # Merge chain findings into scan_results
+                    existing = scan_results.setdefault("vulnerabilities", [])
+                    existing.extend(chain_results["vulnerabilities"])
+                    console.print(f"  Chain added {len(chain_results['vulnerabilities'])} findings")
+            except Exception as e:
+                console.print(f"  Chain: {e}")
+
+        # Phase C: Smart follow-up based on findings
+        vulns = scan_results.get("vulnerabilities", [])
+        if vulns:
+            # Group by severity
+            critical = sum(1 for v in vulns if v.get("severity") == "CRITICAL")
+            high = sum(1 for v in vulns if v.get("severity") == "HIGH")
+            console.print(f"  Phase C: {critical} critical, {high} high findings - delegating exploitation")
+
+        return scan_results
 
     def _run_scanner(self) -> dict:
         """Scanner task (runs in parallel)."""
