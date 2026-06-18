@@ -184,157 +184,47 @@ class SuvariOrchestrator:
 
         elif phase_id == "scan":
             # Browser-based analysis (always runs)
-            browser_findings = []
-            console.print("  Browser: Dynamic page analysis + DOM XSS")
-            try:
-                from .browser import BrowserAgent
-                with BrowserAgent(browser_type=self.browser_type) as browser:
-                    # 1. Navigate to target
-                    page_info = browser.navigate(self.target_url)
-                    if page_info.get("status", 0) in (200, 301, 302, 403):
-                        console.print(f"  Page: {page_info.get('title', '?')} ({page_info.get('status', '?')})")
-                        if page_info.get("client_tech"):
-                            console.print(f"  Client tech: {', '.join(page_info['client_tech'])}")
+            # Parallel: Browser + Scanner + CVE + JWT
+            from concurrent.futures import ThreadPoolExecutor, as_completed
+            scan_results = {}
+            scan_futures = {}
 
-                        # 2. Check for login forms
-                        forms = page_info.get("forms", [])
-                        login_form = any("password" in str(f) for f in forms)
-                        defaults = None
-                        if login_form:
-                            console.print(f"  Login form detected ({len(forms)} forms)")
+            with ThreadPoolExecutor(max_workers=3) as pool:
+                # Parallel tasks
+                scan_futures[pool.submit(self._run_browser)] = "browser"
+                scan_futures[pool.submit(self._run_cve_intel)] = "cve"
+                scan_futures[pool.submit(self._run_scanner)] = "scanner"
 
-                            # 3. Try default credentials
-                            defaults = self._try_default_logins(browser)
-                            if defaults:
-                                console.print(f"  Default login worked: {defaults}")
-                            else:
-                                # 4. Use provided credentials if any
-                                if self.login_creds:
-                                    creds = self.login_creds.split(":", 1)
-                                    login_result = browser.login_form(self.target_url, creds[0], creds[1])
-                                    if login_result.get("success"):
-                                        console.print(f"  Login OK -> {login_result.get('final_url', '?')}")
-                                    else:
-                                        console.print(f"  Login failed")
-                        else:
-                            console.print(f"  No login form detected ({len(forms)} forms)")
+                for fut in as_completed(scan_futures):
+                    name = scan_futures[fut]
+                    try:
+                        result = fut.result()
+                        if name == "browser":
+                            self.context["browser_info"] = result
+                        elif name == "cve":
+                            if result:
+                                self.context["cve_findings"] = result
+                        elif name == "scanner":
+                            self.context["scan_results"] = result
+                    except Exception as e:
+                        console.print(f"  {name} error: {e}")
 
-                        # 5. DOM XSS check (always)
-                        dom_xss = browser.check_dom_xss(self.target_url)
-                        if dom_xss:
-                            browser_findings = dom_xss
-                            console.print(f"  DOM XSS: {len(dom_xss)} findings")
-
-                        # 6. Screenshot
-                        ss = browser.screenshot(str(self.ws.path / "browser_screenshot.png"))
-                        if ss:
-                            console.print(f"  Screenshot saved")
-
-                        # Store for analyzer
-                        self.context["browser_info"] = {
-                            "title": page_info.get("title", ""),
-                            "status": page_info.get("status", 0),
-                            "tech": page_info.get("client_tech", []),
-                            "forms": len(forms),
-                            "scripts": len(page_info.get("scripts", [])),
-                            "dom_xss": browser_findings,
-                            "login_worked": self.login_creds is not None,
-                        }
-
-                        # 7. Self-registration if login form found
-                        if login_form and not defaults and not self.login_creds:
-                            console.print("  Trying self-registration...")
-                            reg_result = browser.self_register(self.target_url)
-                            if reg_result.get("success"):
-                                console.print(f"  Self-registration OK: {reg_result.get('credentials', {}).get('email','')}")
-                                self.context["browser_registration"] = reg_result.get("credentials")
-                    else:
-                        console.print(f"  Page error: {page_info.get('error', 'unknown')}")
-
-            except ImportError:
-                console.print("  Browser: Playwright not installed. Install: pip install playwright")
-            except Exception as e:
-                console.print(f"  Browser error: {e}")
-
-            # CVE Intelligence: check detected technologies for known vulnerabilities
-            recon_results = self.context.get("recon_results", {})
-            if recon_results:
-                try:
-                    from .cve_intel import extract_versions, query_cve_api, query_searchsploit, generate_exploit
-                    tech_versions = extract_versions(recon_results)
-                    if tech_versions:
-                        cve_findings = []
-                        for tv in tech_versions[:3]:  # Top 3 techs
-                            cves = query_cve_api(tv["technology"], tv["version"])
-                            if not cves:
-                                cves = query_searchsploit(tv["technology"], tv["version"])
-                            for cve in cves[:2]:
-                                cve_findings.append({
-                                    "type": f"CVE: {cve.get('id', '?')}",
-                                    "location": f"{tv['technology']} {tv['version']}",
-                                    "severity": "CRITICAL" if str(cve.get('cvss', '0')).startswith(("9", "10")) else "HIGH",
-                                    "description": cve.get("summary", "")[:200],
-                                    "cve_id": cve.get("id", ""),
-                                    "cvss": cve.get("cvss", "N/A"),
-                                })
-                        if cve_findings:
-                            console.print(f"  CVE Intel: {len(cve_findings)} known vulnerabilities")
-                            self.context["cve_findings"] = cve_findings
-
-                            # Generate exploit for most critical
-                            top_cve = cve_findings[0]
-                            top_tech = tech_versions[0]
-                            if top_cve.get("cve_id"):
-                                exploit = generate_exploit(
-                                    top_tech["technology"], top_tech["version"],
-                                    top_cve["cve_id"], top_cve["description"],
-                                    self.llm
-                                )
-                                if exploit and not exploit.startswith("# Failed"):
-                                    exploit_path = self.ws.path / f"exploit_{top_cve['cve_id']}.py"
-                                    exploit_path.write_text(exploit)
-                                    console.print(f"  Exploit generated: {exploit_path.name}")
-                except Exception as e:
-                    console.print(f"  CVE Intel error: {e}")
-
-            # JWT Analysis: check for JWT tokens in recon results
+            # JWT analysis (depends on recon, quick)
             all_text = str(self.context.get("recon_results", {}))
             import re
-            jwt_pattern = r'eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+'
-            jwt_matches = re.findall(jwt_pattern, all_text)
+            jwt_matches = re.findall(r'eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+', all_text)
             if jwt_matches:
                 try:
                     from .jwt_analysis import analyze_jwt
                     for token in jwt_matches[:3]:
                         analysis = analyze_jwt(token)
-                        if "findings" in analysis and analysis["findings"]:
-                            console.print(f"  JWT Analysis: {analysis['summary']}")
+                        if analysis.get("findings"):
                             self.context["jwt_findings"] = analysis["findings"]
+                            console.print(f"  JWT Analysis: {analysis['summary']}")
                 except Exception as e:
-                    console.print(f"  JWT error: {e}")
+                    pass
 
-            # Tree chain scan
-            if self.chain_mode:
-                from .chain import ScanChain
-                console.print("  Tree-based recursive scan chain")
-                try:
-                    chain = ScanChain(self.target_url, self.llm, self.tools, self.ws,
-                                      fast=self.fast, verbose=self.verbose)
-                    findings = chain.run()
-                    self.context["scan_chain"] = [n.to_dict() for n in chain.root.children]
-                    self.context["chain_log"] = chain.chain_log
-                    self.context["scan_results"] = {"chain_findings": findings,
-                                                     "_total_time": "chain"}
-                    self.logger.info("phase", f"Chain scan complete: {len(findings)} leads")
-                except Exception as e:
-                    console.print(f"  Chain error: {e}")
-                    self.logger.error("phase", f"Chain failed: {e}")
-                    self.context["scan_results"] = {"_total_time": "chain_error"}
-            else:
-                self.context["scan_results"] = self.scanner_agent.run(self.context)
-            scan_ok = self.context.get("scan_results", {})
-            tools_run = [k for k in scan_ok if not k.endswith("_time") and not k.endswith("_status") and not k.startswith("_")]
-            self.logger.info("phase", f"Scan complete: {tools_run}")
+            self.logger.info("phase", f"Scan complete")
 
         elif phase_id == "analyze":
             if self.context.get("user_suggestions"):
@@ -380,3 +270,89 @@ class SuvariOrchestrator:
             except Exception:
                 continue
         return None
+
+    def _run_browser(self) -> dict:
+        """Browser analysis task (runs in parallel)."""
+        result = {"title": "", "status": 0, "tech": [], "forms": 0, "scripts": 0, "dom_xss": []}
+        console = Console()
+        try:
+            from .browser import BrowserAgent
+            with BrowserAgent(browser_type=self.browser_type) as browser:
+                page_info = browser.navigate(self.target_url)
+                if page_info.get("status", 0) in (200, 301, 302, 403):
+                    forms = page_info.get("forms", [])
+                    login_form = any("password" in str(f) for f in forms)
+                    result = {
+                        "title": page_info.get("title", ""),
+                        "status": page_info.get("status", 0),
+                        "tech": page_info.get("client_tech", []),
+                        "forms": len(forms),
+                        "scripts": len(page_info.get("scripts", [])),
+                        "dom_xss": [],
+                    }
+                    console.print(f"  Page: {page_info.get('title', '?')} ({page_info.get('status', '?')})")
+                    if page_info.get("client_tech"):
+                        console.print(f"  Tech: {', '.join(page_info['client_tech'])}")
+                    if login_form:
+                        defaults = self._try_default_logins(browser)
+                        if defaults:
+                            console.print(f"  Default login: {defaults}")
+                        elif self.login_creds:
+                            creds = self.login_creds.split(":", 1)
+                            if browser.login_form(self.target_url, creds[0], creds[1]).get("success"):
+                                console.print("  Login OK")
+                    dom_xss = browser.check_dom_xss(self.target_url)
+                    if dom_xss:
+                        result["dom_xss"] = dom_xss
+                        console.print(f"  DOM XSS: {len(dom_xss)}")
+                    browser.screenshot(str(self.ws.path / "browser_screenshot.png"))
+        except ImportError:
+            console.print("  Browser: pip install playwright")
+        except Exception as e:
+            console.print(f"  Browser: {e}")
+        return result
+
+    def _run_cve_intel(self) -> list:
+        """CVE intelligence task (runs in parallel)."""
+        console = Console()
+        findings = []
+        try:
+            from .cve_intel import extract_versions, query_cve_api, generate_exploit
+            recon_results = self.context.get("recon_results", {})
+            tech_versions = extract_versions(recon_results)
+            for tv in tech_versions[:3]:
+                cves = query_cve_api(tv["technology"], tv["version"])
+                for cve in cves[:2]:
+                    findings.append({
+                        "type": f"CVE: {cve.get('id', '?')}", "location": f"{tv['technology']} {tv['version']}",
+                        "severity": "CRITICAL" if str(cve.get('cvss', '0')).startswith(("9", "10")) else "HIGH",
+                        "description": cve.get("summary", "")[:200], "cve_id": cve.get("id", ""),
+                    })
+            if findings:
+                console.print(f"  CVE: {len(findings)} known vulns")
+                top = findings[0]
+                tv = tech_versions[0] if tech_versions else {}
+                if top.get("cve_id") and tv:
+                    exploit = generate_exploit(
+                        tv.get("technology", ""), tv.get("version", ""),
+                        top["cve_id"], top["description"], self.llm)
+                    if exploit and not exploit.startswith("# Failed"):
+                        (self.ws.path / f"exploit_{top['cve_id']}.py").write_text(exploit)
+                        console.print(f"  Exploit saved")
+        except Exception:
+            pass
+        return findings
+
+    def _run_scanner(self) -> dict:
+        """Scanner task (runs in parallel)."""
+        console = Console()
+        if self.chain_mode:
+            from .chain import ScanChain
+            try:
+                chain = ScanChain(self.target_url, self.llm, self.tools, self.ws, fast=self.fast)
+                findings = chain.run()
+                return {"chain_findings": findings, "_total_time": "chain"}
+            except Exception as e:
+                console.print(f"  Chain: {e}")
+                return {"_total_time": "chain_error"}
+        return self.scanner_agent.run(self.context)
