@@ -249,26 +249,20 @@ class ChatSession:
             pass
 
     def _extract_tool_commands(self, text: str) -> list:
-        """Extract tool commands only from ```tool blocks. Ignore plain text."""
+        """Extract tool commands only from ```tool blocks."""
         cmds = []
-        # Only match ```tool blocks (strict)
+        # Match ```tool blocks (strict)
         for m in re.finditer(r'```tool\n(.+?)\n```', text, re.DOTALL):
             c = m.group(1).strip()
             if c and not c.startswith("#"):
                 cmds.append(c)
-        # Also match ```bash blocks with actual commands (not analysis text)
+        # Match ```bash blocks - only accept known tools
         if not cmds:
+            # Dynamically get available tools
+            known = set(self.tools.available_tools().keys())
+            known.update(["cat", "ls", "find", "grep", "head", "tail", "echo", "dig", "ping", "nc", "nslookup", "python3", "python", "ruby", "perl"])
             for m in re.finditer(r'```(?:bash|sh)?\n(.+?)\n```', text, re.DOTALL):
                 c = m.group(1).strip()
-                # Only accept if it starts with a known tool or common command prefix
-                known = ["curl", "nmap", "nuclei", "gobuster", "whatweb", "wafw00f",
-                         "sqlmap", "hydra", "ffuf", "nikto", "wpscan", "dig", "ping",
-                         "nc", "nslookup", "python3", "python", "ruby", "perl",
-                         "cat", "ls", "find", "grep", "head", "tail", "echo",
-                         "wget", "masscan", "dnsenum", "dnsrecon", "fierce", "enum4linux",
-                         "smbmap", "responder", "rpcclient", "theharvester", "amass",
-                         "netexec", "john", "hashcat", "feroxbuster", "dirb",
-                         "httpx", "wpscan", "nikto", "openssl"]
                 first_word = c.split()[0] if c else ""
                 if first_word in known:
                     cmds.append(c)
