@@ -107,7 +107,7 @@ class ChatSession:
         # Everything else goes through P-E-R
         self._per_loop(text)
 
-    def _per_loop(self, user_input: str, max_rounds: int = 3):
+    def _per_loop(self, user_input: str, max_rounds: int = 5):
         """Planner-Executor-Reflector loop. AI decides, runs tools, analyzes."""
         self.history.append({"role": "user", "content": user_input})
 
@@ -131,8 +131,14 @@ class ChatSession:
             for cmd in commands:
                 console.print(f"  $ {cmd}")
                 try:
-                    parts = shlex.split(cmd)
-                    output = self.tools.run(parts, timeout=60)
+                    # Support pipes with shell
+                    if "|" in cmd:
+                        import subprocess as sp
+                        result = sp.run(cmd, shell=True, capture_output=True, text=True, timeout=60)
+                        output = result.stdout + result.stderr
+                    else:
+                        parts = shlex.split(cmd)
+                        output = self.tools.run(parts, timeout=60)
                 except Exception as e:
                     output = f"(error: {e})"
                 preview = output[:500].replace("\n", "\n  ")
