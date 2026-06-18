@@ -112,12 +112,15 @@ class ChatSession:
             self._cmd_check(text)
             return
 
-        # CTF detection
-        ctf_keywords = ["ctf", "pcap", "binary", "stego", "forensic", "crypto", "rev", "reverse",
-                        "flag", "challenge", "buffer overflow", "rop", "shellcode", "exploit",
-                        "encrypted", "encoded", "obfuscated", "dump", "memory dump",
-                        "rootme", "hackthebox", "tryhackme", "htb"]
-        if any(kw in t for kw in ctf_keywords):
+        # CTF detection - strict: must mention a CTF type + file/description
+        ctf_keywords = ["ctf", "pcap dosyası", "binary var", "buffer overflow",
+                        "stego", "forensic", "crypto challenge", "reverse engineering",
+                        "flag arıyorum", "challenge var", "rootme", "hackthebox",
+                        "tryhackme", "htb", "exploit yaz"]
+        ctf_count = sum(1 for kw in ctf_keywords if kw in t)
+        has_file_type = any(kw in t for kw in ["pcap", "binary", "resim", "image", "exe", "elf",
+                                                  "dump", "sifreli", "encrypted", "encoded"])
+        if ctf_count >= 2 or (ctf_count >= 1 and has_file_type):
             self._handle_ctf(text)
             return
 
@@ -150,44 +153,23 @@ class ChatSession:
             console.print(f"[red]Error: {e}[/red]")
 
     def _handle_ctf(self, text: str):
-        """Handle CTF challenge descriptions naturally."""
-        console.print("[dim]CTF challenge detected. Analyzing...[/dim]")
+        """Handle CTF challenge descriptions - suggest tools and commands."""
+        from .config import load_config
 
-        # Step 1: Find relevant files in current directory
-        cwd = Path.cwd()
-        all_files = list(cwd.iterdir()) if cwd.exists() else []
-        files_info = []
-        for f in all_files[:30]:
-            if f.is_file() and not f.name.startswith("."):
-                size = f.stat().st_size
-                kind = self._quick_file_type(f)
-                files_info.append(f"  {f.name} ({kind}, {size}b)")
-
-        file_context = "\n".join(files_info) if files_info else "  No relevant files found in current directory."
-
-        # Step 2: Let AI analyze with file context
-        ctf_prompt = f"""The user describes a CTF challenge: "{text}"
-
-Files found in current directory:
-{file_context}
-
-Analyze what kind of CTF challenge this is and what tools to use.
-If files are relevant, describe what to do with them.
-If no files found, ask the user where the challenge file is.
-
-For each file type suggest specific commands:
-- Binary/ELF: file, strings, checksec, objdump, gdb
-- Pcap: tshark, wireshark, strings
-- Image/jpg/png: exiftool, strings, binwalk, steghide, zsteg
-- Text: file, head, cat, crypto analysis
-- Audio: strings, spectrogram analysis
-
-Respond in the same language as the user. Be concise and actionable.
-"""
-        response = self.llm.chat(messages=[{"role": "user", "content": ctf_prompt}], temperature=0.5, max_tokens=1024)
-        console.print(response)
-        self.history.append({"role": "assistant", "content": response})
-
+        t = text.lower()
+        if "pcap" in t or "dns" in t:
+            console.print("Try: tshark -r *.pcap -Y 'dns' -T fields -e dns.qry.name")
+        elif any(x in t for x in ["binary", "elf", "exe", "buffer overflow"]):
+            console.print("Try: file *; checksec *; strings *; gdb -q ./binary")
+        elif any(x in t for x in ["stego", "resim", "image", "jpg", "png"]):
+            console.print("Try: binwalk *; strings *; exiftool *; steghide extract -sf *")
+        elif any(x in t for x in ["crypto", "sifreli", "encrypted"]):
+            console.print("Identify cipher type, try frequency analysis or brute force")
+        elif "forensic" in t or "dump" in t:
+            console.print("Try: volatility -f *.mem imageinfo; strings *; foremost *")
+        else:
+            console.print("Describe the challenge type (binary, pcap, stego, crypto, web) for specific tools.")
+        self.history.append({"role": "assistant", "content": f"CTF: {text[:60]}"})
     def _quick_file_type(self, fpath: Path) -> str:
         """Quick file type detection."""
         try:
