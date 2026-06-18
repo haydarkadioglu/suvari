@@ -43,7 +43,7 @@ When given a scan directory: read the findings, reason about what they mean, sug
 Make connections: "X technology + Y port + Z finding = possible attack chain."
 
 Be insightful, not just a tool runner. Think like an experienced pentester.
-Respond in same language as user."""
+Respond in the user's language (match their input language)."""
 
 
 class ChatSession:
