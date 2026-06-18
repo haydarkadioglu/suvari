@@ -6,6 +6,7 @@ Focused recon + vulnerability hunting + OSINT for bug bounty targets.
 """
 
 from .base import BaseAgent
+import time
 
 
 class BugBountyAgent(BaseAgent):
@@ -71,8 +72,9 @@ class BugBountyAgent(BaseAgent):
         return results
 
     def _enum_subdomains(self, domain: str) -> list:
-        """Enumerate subdomains using available tools + DNS fallback."""
+        """Enumerate subdomains using available tools + DNS fallback (max 30s)."""
         found = set()
+        deadline = time.time() + 28  # 28 second total budget
 
         # Method 1: subfinder
         if self.tools.check_tool("subfinder"):
@@ -82,17 +84,21 @@ class BugBountyAgent(BaseAgent):
                 if line and not line.startswith("("):
                     found.add(line.lower())
 
-        # Method 2: crt.sh Certificate Transparency logs (no tool needed)
+        # Method 2: crt.sh Certificate Transparency logs (tight timeout)
         try:
-            import urllib.request, json
-            url = f"https://crt.sh/?q=%25.{domain}&output=json"
-            req = urllib.request.Request(url, headers={"User-Agent": "Suvari/1.0"})
-            resp = urllib.request.urlopen(req, timeout=15)
-            data = json.loads(resp.read())
-            for entry in data[:100]:
-                name = entry.get("name_value", "").strip()
-                if name and name.endswith(domain):
-                    found.add(name.lower())
+            import json
+            resp = self.tools.run(
+                ["curl", "-s", "--max-time", "10",
+                 f"https://crt.sh/?q=%25.{domain}&output=json"],
+                timeout=15
+            )
+            if resp and not resp.startswith("("):
+                data = json.loads(resp)
+                for entry in data[:100]:
+                    name = entry.get("name_value", "").strip()
+                    if name and name.endswith(domain):
+                        for n in name.split("\n"):
+                            found.add(n.strip().lower())
         except Exception:
             pass
 
