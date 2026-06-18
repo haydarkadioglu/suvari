@@ -137,24 +137,35 @@ class BugBountyAgent(BaseAgent):
                 if result:
                     found.add(result)
 
-        # Verify results with HTTP check (filter out DNS wildcards)
+        # Verify results with HTTP check (parallel, filter out DNS wildcards)
         if found:
-            verified = set()
-            for sub in sorted(found)[:30]:
+            from concurrent.futures import ThreadPoolExecutor, as_completed
+            import subprocess as sp
+
+            def check_sub(sub):
                 for proto in ("https", "http"):
-                    out = self.tools.run(
-                        ["curl", "-sI", "-o", "/dev/null", "-w", "%{http_code}",
-                         f"{proto}://{sub}", "--max-time", "3"], timeout=5
-                    )
-                    code = out.strip()
-                    if code not in ("000", "", "(error)", "(empty)",):
-                        verified.add(sub)
-                        break
-            if verified:
-                found = verified
-            else:
-                # DNS wildcard - no real subdomains found
-                found = set()
+                    try:
+                        result = sp.run(
+                            ["curl", "-sI", "-o", "/dev/null", "-w", "%{http_code}",
+                             f"{proto}://{sub}", "--max-time", "3"],
+                            capture_output=True, text=True, timeout=5
+                        )
+                        code = result.stdout.strip()
+                        if code not in ("000", "", "(error)", "(empty)"):
+                            return sub
+                    except Exception:
+                        continue
+                return None
+
+            verified = set()
+            with ThreadPoolExecutor(max_workers=15) as pool:
+                futs = {pool.submit(check_sub, s): s for s in sorted(found)[:30]}
+                for fut in as_completed(futs):
+                    result = fut.result(timeout=6)
+                    if result:
+                        verified.add(result)
+
+            found = verified if verified else set()
 
         return sorted(found)
 
