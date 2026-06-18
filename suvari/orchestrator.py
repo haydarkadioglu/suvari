@@ -317,14 +317,19 @@ class SuvariOrchestrator:
             if self.chain_mode:
                 from .chain import ScanChain
                 console.print("  Tree-based recursive scan chain")
-                chain = ScanChain(self.target_url, self.llm, self.tools, self.ws,
-                                  fast=self.fast, verbose=self.verbose)
-                findings = chain.run()
-                self.context["scan_chain"] = [n.to_dict() for n in chain.root.children]
-                self.context["chain_log"] = chain.chain_log
-                self.context["scan_results"] = {"chain_findings": findings,
-                                                 "_total_time": "chain"}
-                self.logger.info("phase", f"Chain scan complete: {len(findings)} leads")
+                try:
+                    chain = ScanChain(self.target_url, self.llm, self.tools, self.ws,
+                                      fast=self.fast, verbose=self.verbose)
+                    findings = chain.run()
+                    self.context["scan_chain"] = [n.to_dict() for n in chain.root.children]
+                    self.context["chain_log"] = chain.chain_log
+                    self.context["scan_results"] = {"chain_findings": findings,
+                                                     "_total_time": "chain"}
+                    self.logger.info("phase", f"Chain scan complete: {len(findings)} leads")
+                except Exception as e:
+                    console.print(f"  Chain error: {e}")
+                    self.logger.error("phase", f"Chain failed: {e}")
+                    self.context["scan_results"] = {"_total_time": "chain_error"}
             else:
                 self.context["scan_results"] = self.scanner_agent.run(self.context)
             scan_ok = self.context.get("scan_results", {})
