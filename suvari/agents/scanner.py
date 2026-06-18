@@ -112,8 +112,8 @@ class ScannerAgent(BaseAgent):
             self.log(f"  AI plan error: {e}, fallback")
             tool_plan = [{"tool": "nuclei", "args": ["-silent", "-severity", "critical,high,medium"], "reason": "Fallback"}]
 
-        max_tools = 5 if fast else 10
-        tool_plan = tool_plan[:max_tools]
+        # No artificial limits - use all tools AI recommends
+        tool_plan = tool_plan[:20]  # Safety cap at 20 (practical limit)
         if not tool_plan and "nuclei" in avail:
             tool_plan = [{"tool": "nuclei", "args": ["-silent", "-severity", "critical,high,medium"], "reason": "Fallback"}]
 

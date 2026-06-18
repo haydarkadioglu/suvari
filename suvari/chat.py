@@ -100,7 +100,7 @@ class ChatSession:
             return
         self._per_loop(text)
 
-    def _per_loop(self, user_input: str, max_rounds: int = 10):
+    def _per_loop(self, user_input: str, max_rounds: int = 20):
         """P-E-R loop. Loads scan findings if path provided. Saves results to scan dir."""
         self.history.append({"role": "user", "content": user_input})
         avail = ", ".join(sorted(self.tools.available_tools().keys()))
