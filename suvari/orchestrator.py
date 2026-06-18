@@ -4,6 +4,7 @@ Inspired by Shannon's multi-agent pipeline + LuaN1aoAgent's P-E-R framework.
 """
 
 from typing import Optional
+from .bus import FindingsBus
 from pathlib import Path
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
@@ -72,7 +73,13 @@ class SuvariOrchestrator:
 
         self.context = {"target_url": target_url, "fast": fast, "source_dir": source_dir,
                         "mode": scan_mode, "server_scan": server_scan, "parallel": parallel,
-                        "login_creds": login_creds}
+                        "login_creds": login_creds, "browser_type": browser_type}
+        self.bus = FindingsBus()
+
+        # Agents subscribe to relevant findings
+        self.bus.subscribe("port", self._on_port_found)
+        self.bus.subscribe("cve", self._on_cve_found)
+        self.bus.subscribe("vuln", self._on_vuln_found)
 
     def run(self):
         """Start (or resume) the pipeline."""
@@ -148,6 +155,32 @@ class SuvariOrchestrator:
                     progress.remove_task(task)
 
         self._show_results()
+
+    def _on_port_found(self, agent: str, finding: dict):
+        """React to a discovered port."""
+        port = finding.get("detail", "")
+        self.logger.info("bus", f"Port from {agent}: {port}")
+
+    def _on_cve_found(self, agent: str, finding: dict):
+        """React to a discovered CVE."""
+        cve = finding.get("cve_id", finding.get("detail", ""))
+        self.logger.info("bus", f"CVE from {agent}: {cve}")
+        # Auto-trigger exploit generation for critical CVEs
+        if finding.get("severity") in ("CRITICAL", "HIGH"):
+            self.context.setdefault("critical_cves", []).append(finding)
+
+    def _on_vuln_found(self, agent: str, finding: dict):
+        """React to a discovered vulnerability."""
+        vtype = finding.get("type", "")
+        sev = finding.get("severity", "")
+        self.logger.info("bus", f"Vuln from {agent}: [{sev}] {vtype}")
+        # Auto-delegate exploitation for critical/high
+        if sev in ("CRITICAL", "HIGH") and agent != "delegated":
+            from .agents.exploiter import ExploiterAgent
+            from .workspace import Workspace
+            sub_ws = Workspace(f"bus-{vtype[:15]}")
+            sub = ExploiterAgent("delegated", self.llm, sub_ws, self.tools)
+            sub.run({"target_url": self.target_url, "analysis": {"vulnerabilities": [finding]}})
 
     def _get_phase_output(self, phase_id: str) -> str:
         return self.ws.get_phase_output(phase_id)[:2000]
