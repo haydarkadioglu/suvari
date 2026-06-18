@@ -1,6 +1,6 @@
 """
-Failure Attribution — L0-L5 failure classification and recovery strategies.
-Adapted from LuaN1aoAgent's failure attribution model and Shannon's error handling.
+Unified Failure Attribution — L0-L5 classification and recovery strategies.
+Merged from failure.py + knowledge.py (knowledge.py is now deprecated).
 """
 
 from enum import Enum
@@ -8,131 +8,95 @@ from typing import Optional
 
 
 class FailureLevel(Enum):
-    """L0-L5 failure classification (LuaN1aoAgent-inspired)."""
-    L0_OBSERVATION = "L0"       # Raw tool output, no failure
-    L1_TOOL_ERROR = "L1"        # Tool not found, timeout, syntax error
-    L2_PREREQUISITE = "L2"      # Auth failed, session expired, dependency missing
-    L3_ENVIRONMENT = "L3"       # WAF, firewall, rate limit, target down
-    L4_HYPOTHESIS = "L4"        # Wrong approach, parameter not vulnerable
-    L5_STRATEGY = "L5"          # Wrong attack path, dead end
-
-    @property
-    def retryable(self) -> bool:
-        """Can this failure be retried?"""
-        return self in (FailureLevel.L1_TOOL_ERROR, FailureLevel.L3_ENVIRONMENT)
-
-    @property
-    def requires_replan(self) -> bool:
-        """Does this failure require a new plan?"""
-        return self in (FailureLevel.L4_HYPOTHESIS, FailureLevel.L5_STRATEGY)
+    """L0-L5 failure severity levels (from LuaN1aoAgent)."""
+    L0_OBSERVATION = 0     # Raw tool output - normal
+    L1_TOOL_ERROR = 1      # Tool not found, timeout, syntax error
+    L2_PREREQUISITE = 2    # Auth failed, session expired
+    L3_ENVIRONMENT = 3     # WAF, rate limit, target down
+    L4_HYPOTHESIS = 4      # Wrong approach/parameter
+    L5_STRATEGY = 5        # Wrong attack path, need replan
 
 
-# Common error patterns and their classifications
-ERROR_PATTERNS = [
-    # L1: Tool errors
-    (["not found", "no such file", "command not found"], FailureLevel.L1_TOOL_ERROR, "Tool not installed"),
-    (["timeout", "timed out"], FailureLevel.L1_TOOL_ERROR, "Tool timed out"),
-    (["syntax error", "invalid option", "unrecognized"], FailureLevel.L1_TOOL_ERROR, "Wrong arguments"),
-    (["permission denied", "access denied"], FailureLevel.L1_TOOL_ERROR, "Permission denied"),
-    # L2: Prerequisite failures
-    (["unauthorized", "401", "login failed", "authentication failed"], FailureLevel.L2_PREREQUISITE, "Authentication required"),
-    (["session expired", "token expired"], FailureLevel.L2_PREREQUISITE, "Session expired"),
-    (["not installed", "could not find"], FailureLevel.L2_PREREQUISITE, "Dependency missing"),
-    # L3: Environment
-    (["waf", "blocked", "captcha"], FailureLevel.L3_ENVIRONMENT, "Blocked by WAF/security"),
-    (["rate limit", "too many requests", "429"], FailureLevel.L3_ENVIRONMENT, "Rate limited"),
-    (["connection refused", "no route to host", "dns lookup failed"], FailureLevel.L3_ENVIRONMENT, "Target unreachable"),
-    (["503", "502", "500", "service unavailable"], FailureLevel.L3_ENVIRONMENT, "Target server error"),
-    # L4: Wrong hypothesis
-    (["no vulnerability", "not vulnerable", "false positive"], FailureLevel.L4_HYPOTHESIS, "Not vulnerable"),
-    (("empty",), FailureLevel.L4_HYPOTHESIS, "No results (may be wrong approach)"),
-    # L5: Strategy
-    (["all attempts failed", "no progress", "stuck"], FailureLevel.L5_STRATEGY, "Dead end, need new strategy"),
-]
+# Mapping from old knowledge.py L1-L6 to new L0-L5
+LEGACY_MAP = {
+    "L1_TOOL_NOT_FOUND": FailureLevel.L1_TOOL_ERROR,
+    "L2_PERMISSION": FailureLevel.L2_PREREQUISITE,
+    "L3_UNEXPECTED_OUTPUT": FailureLevel.L4_HYPOTHESIS,
+    "L4_STRATEGIC": FailureLevel.L5_STRATEGY,
+    "L5_TIMEOUT": FailureLevel.L1_TOOL_ERROR,
+    "L6_LLM_ERROR": FailureLevel.L1_TOOL_ERROR,
+}
 
 
-def classify_failure(output: str, tool: str = "") -> tuple[FailureLevel, str]:
-    """Classify a tool's output into a failure level.
-
-    Returns (level, reason).
-    """
-    if not output or output == "(empty)":
-        # Empty output could mean L4 (no vuln found) or L2 (couldn't connect)
-        return FailureLevel.L4_HYPOTHESIS, "Tool returned empty results"
-
+def classify_failure(tool_name: str, output: str, duration: float) -> FailureLevel:
+    """Classify a tool execution failure into L0-L5 level."""
     out_lower = output.lower()
+    duration = duration or 0
 
-    for patterns, level, reason in ERROR_PATTERNS:
-        for pattern in patterns:
-            if pattern in out_lower:
-                return level, reason
+    # L0: Success
+    if not output.startswith("(") and not output.startswith("TIMEOUT"):
+        if len(output) > 10:
+            return FailureLevel.L0_OBSERVATION
 
-    # Check for parentheses-wrapped errors from our runner
-    if output.startswith("("):
-        if "timeout" in out_lower:
-            return FailureLevel.L1_TOOL_ERROR, "Tool timed out"
-        if "not found" in out_lower:
-            return FailureLevel.L1_TOOL_ERROR, "Tool not found"
-        return FailureLevel.L1_TOOL_ERROR, f"Tool error: {output[1:40]}"
+    # L1: Tool execution failure
+    if any(x in out_lower for x in ["not found", "no such file", "command not found"]):
+        return FailureLevel.L1_TOOL_ERROR
+    if output.startswith("(TIMEOUT"):
+        return FailureLevel.L1_TOOL_ERROR
+    if any(x in out_lower for x in ["option is unknown", "invalid option", "try 'curl --help'"]):
+        return FailureLevel.L1_TOOL_ERROR
 
-    return FailureLevel.L0_OBSERVATION, "Tool ran successfully"
+    # L2: Prerequisite failure
+    if any(x in out_lower for x in ["unauthorized", "401", "403", "forbidden", "permission denied"]):
+        return FailureLevel.L2_PREREQUISITE
+    if any(x in out_lower for x in ["session expired", "authentication required", "login required"]):
+        return FailureLevel.L2_PREREQUISITE
+
+    # L3: Environment interference
+    if any(x in out_lower for x in ["cloudflare", "waf", "rate limit", "429", "too many requests"]):
+        return FailureLevel.L3_ENVIRONMENT
+    if any(x in out_lower for x in ["connection refused", "connection timed out", "no route to host"]):
+        return FailureLevel.L3_ENVIRONMENT
+
+    # L4: Hypothesis wrong
+    if any(x in out_lower for x in ["404", "no results", "0 found", "empty", "nothing found"]):
+        return FailureLevel.L4_HYPOTHESIS
+
+    # L5: Strategic
+    if duration > 120:
+        return FailureLevel.L5_STRATEGY
+    if output.startswith("(error:"):
+        return FailureLevel.L1_TOOL_ERROR
+
+    return FailureLevel.L0_OBSERVATION
 
 
-def get_recovery_strategy(level: FailureLevel, tool: str = "") -> dict:
-    """Get recovery strategy for a failure level.
+# Fallback tools: primary → fallback mapping
+FALLBACK_MAP = {
+    "nmap": ["masscan", "rustscan"],
+    "gobuster": ["ffuf", "feroxbuster", "dirb"],
+    "ffuf": ["feroxbuster", "gobuster"],
+    "whatweb": ["httpx", "curl"],
+    "wafw00f": ["curl"],  # Manual WAF detection via headers
+    "dnsenum": ["dnsrecon", "fierce"],
+    "dnsrecon": ["fierce", "dnsenum"],
+    "theharvester": ["amass"],
+}
 
-    Returns dict with action, message, and optional alternative tool.
-    """
+
+def get_recovery_strategy(level: FailureLevel, tool_name: str) -> str:
+    """Get recovery strategy based on failure level."""
     strategies = {
-        FailureLevel.L1_TOOL_ERROR: {
-            "action": "retry_or_fallback",
-            "message": f"Tool error, trying alternative approach",
-            "fallback_tools": _get_fallback(tool),
-        },
-        FailureLevel.L2_PREREQUISITE: {
-            "action": "fix_prerequisite",
-            "message": "Prerequisite not met, attempting workaround",
-            "fallback_tools": [],
-        },
-        FailureLevel.L3_ENVIRONMENT: {
-            "action": "slow_down_or_skip",
-            "message": "Environment blocking request, slowing down or skipping",
-            "fallback_tools": [],
-        },
-        FailureLevel.L4_HYPOTHESIS: {
-            "action": "try_different",
-            "message": "Current approach not working, trying different method",
-            "fallback_tools": _get_fallback(tool),
-        },
-        FailureLevel.L5_STRATEGY: {
-            "action": "replan",
-            "message": "Strategic dead end, need to reassess",
-            "fallback_tools": [],
-        },
+        FailureLevel.L0_OBSERVATION: "continue",
+        FailureLevel.L1_TOOL_ERROR: f"fallback to alternative tool for {tool_name}" if tool_name in FALLBACK_MAP else "skip",
+        FailureLevel.L2_PREREQUISITE: "check credentials and retry",
+        FailureLevel.L3_ENVIRONMENT: "reduce speed, add delay, try alternative approach",
+        FailureLevel.L4_HYPOTHESIS: "try different parameter/endpoint",
+        FailureLevel.L5_STRATEGY: "replan attack path",
     }
-    return strategies.get(level, {
-        "action": "continue",
-        "message": "Unknown outcome, continuing",
-        "fallback_tools": [],
-    })
+    return strategies.get(level, "skip")
 
 
-def _get_fallback(tool: str) -> list:
-    """Get alternative tools for when a tool fails."""
-    fallbacks = {
-        "nmap": ["masscan", "rustscan"],
-        "masscan": ["nmap"],
-        "gobuster": ["ffuf", "feroxbuster", "dirb"],
-        "ffuf": ["gobuster", "feroxbuster"],
-        "nikto": ["nuclei"],
-        "nuclei": ["nikto", "jaeles"],
-        "whatweb": ["httpx", "curl"],
-        "wpscan": ["nuclei"],
-        "hydra": ["medusa", "patator"],
-        "sqlmap": [],  # No real alternative for SQLi
-        "enum4linux": ["smbmap", "rpcclient"],
-        "subfinder": ["amass", "dnsenum"],
-        "dnsenum": ["dnsrecon", "fierce"],
-        "curl": ["httpx", "wget"],
-    }
-    return fallbacks.get(tool, [])
+def get_fallback_tool(tool_name: str) -> Optional[str]:
+    """Get fallback tool for a given tool."""
+    return FALLBACK_MAP.get(tool_name, [None])[0]

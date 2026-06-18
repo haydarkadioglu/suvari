@@ -186,10 +186,10 @@ class SuvariOrchestrator:
             # Browser-based analysis (always runs)
             # Parallel: Browser + Scanner + CVE + JWT
             from concurrent.futures import ThreadPoolExecutor, as_completed
-            scan_results = {}
+            pool_size = min(self.context.get("parallel", 3), 5)
             scan_futures = {}
 
-            with ThreadPoolExecutor(max_workers=3) as pool:
+            with ThreadPoolExecutor(max_workers=pool_size) as pool:
                 # Parallel tasks
                 scan_futures[pool.submit(self._run_browser)] = "browser"
                 scan_futures[pool.submit(self._run_cve_intel)] = "cve"
