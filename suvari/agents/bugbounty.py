@@ -13,36 +13,59 @@ class BugBountyAgent(BaseAgent):
 
     def run(self, context: dict) -> dict:
         url = context["target_url"]
+        import threading, itertools, time, sys
         from rich.console import Console
         console = Console()
-        console.print(f"  [dim]BugBounty: {url}[/dim]")
+        console.print(f"  BugBounty: {url}")
 
         results = {}
         domain = url.split("://")[-1].split("/")[0]
 
-        # Phase 1: Subdomain enumeration
-        console.print(f"  Phase 1: Subdomain enumeration")
+        def spinner(stop, msg):
+            for c in itertools.cycle(['/', '-', '\\', '|']):
+                if stop():
+                    break
+                sys.stdout.write(f'\r  {msg} {c}')
+                sys.stdout.flush()
+                time.sleep(0.1)
+            sys.stdout.write(f'\r  {msg} [OK]\n')
+            sys.stdout.flush()
+
+        # Phase 1
+        stop = False
+        t = threading.Thread(target=spinner, args=(lambda: stop, "Phase 1: Subdomain enumeration"))
+        t.start()
         subdomains = self._enum_subdomains(domain)
+        stop = True
+        t.join()
         results["subdomains"] = subdomains
-        console.print(f"    [OK] {len(subdomains)} subdomains")
 
-        # Phase 2: URL discovery
-        console.print(f"  Phase 2: URL discovery")
+        # Phase 2
+        stop = False
+        t = threading.Thread(target=spinner, args=(lambda: stop, "Phase 2: URL discovery"))
+        t.start()
         urls = self._discover_urls(domain)
+        stop = True
+        t.join()
         results["urls"] = urls
-        console.print(f"    [OK] {len(urls)} URLs")
 
-        # Phase 3: Parameter discovery
-        console.print(f"  Phase 3: Parameter discovery")
+        # Phase 3
+        stop = False
+        t = threading.Thread(target=spinner, args=(lambda: stop, "Phase 3: Parameter discovery"))
+        t.start()
         params = self._discover_params(url)
+        stop = True
+        t.join()
         results["params"] = params
-        console.print(f"    [OK] {len(params)} params")
 
-        # Phase 4: Technology fingerprinting
-        console.print(f"  Phase 4: Technology")
+        # Phase 4
+        stop = False
+        t = threading.Thread(target=spinner, args=(lambda: stop, "Phase 4: Technology"))
+        t.start()
         tech = self._fingerprint_tech(url)
+        stop = True
+        t.join()
         results["technology"] = tech
-        console.print(f"    [OK] {len(tech)} techs")
 
         console.print(f"  Done: {len(subdomains)} subdomains, {len(urls)} URLs")
         return results
@@ -67,23 +90,31 @@ class BugBountyAgent(BaseAgent):
                 if line and not line.startswith("(") and domain in line:
                     found.add(line.lower().split()[-1])
 
-        # Method 3: DNS resolution of common subdomains (always works)
+        # Method 3: Fast DNS resolution of common subdomains (parallel)
         common = ["www", "mail", "ftp", "admin", "api", "blog", "dev", "test",
                    "webmail", "remote", "vpn", "shop", "app", "beta", "m",
-                   "mail2", "pop3", "imap", "smtp", "ns1", "ns2", "mx", "cpanel",
-                   "dns", "server", "support", "help", "forum", "wiki", "cdn",
-                   "cloud", "portal", "secure", "login", "register", "docs",
-                   "monitor", "status", "git", "jenkins", "jira", "confluence"]
+                   "mail2", "ns1", "ns2", "mx", "cpanel", "dns", "server",
+                   "support", "help", "cdn", "cloud", "portal", "secure",
+                   "login", "docs", "monitor", "git"]
 
-        import subprocess, socket
-        for sub in common:
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        import socket
+
+        def resolve(sub):
             try:
+                socket.setdefaulttimeout(3)
                 host = f"{sub}.{domain}"
                 ip = socket.gethostbyname(host)
-                if ip:
-                    found.add(host)
-            except socket.gaierror:
-                continue
+                return host if ip else None
+            except Exception:
+                return None
+
+        with ThreadPoolExecutor(max_workers=10) as pool:
+            futures = {pool.submit(resolve, sub): sub for sub in common}
+            for fut in as_completed(futures):
+                result = fut.result()
+                if result:
+                    found.add(result)
 
         return sorted(found)
 
