@@ -1,6 +1,6 @@
 """
 Chat — interactive pentesting conversation with P-E-R (Planner-Executor-Reflector).
-Spinner + report saving included.
+Loads existing scan findings, saves results to scan directory.
 """
 
 from typing import Optional
@@ -14,7 +14,7 @@ from .workspace import Workspace
 from .tools.runner import ToolRunner
 from .mode import ScanMode
 from .config import load_config
-import re, shlex
+import re, shlex, json
 
 console = Console()
 
@@ -30,17 +30,15 @@ After you run a command, you'll see the output. Then you can run more commands o
 
 RULES:
 - Be concise. Final response: 2-3 sentences.
-- For scan results: list findings briefly.
-- For CTF: suggest specific commands.
+- Actually test things, don't just describe them.
+- If there are existing scan findings, dive deeper on each one.
 - For report queries: say "read the report" and the system will show it.
-- Never say "I'll check" or describe what you'd do - just do it with tools.
+- Never say "I'll check" - just do it with tools.
 - Respond in the same language as the user.
 """
 
 
 class ChatSession:
-    """Interactive pentesting chat with tool execution."""
-
     def __init__(self):
         cfg = load_config()
         self.llm = LLMClient(provider=cfg.get("provider", "deepseek"), model=cfg.get("model"))
@@ -51,14 +49,12 @@ class ChatSession:
     def run(self):
         console.print("[bold][SUVARI] — AI Pentester Assistant[/bold]")
         console.print("Type 'help' for commands, 'exit' to quit.\n")
-
         while True:
             try:
                 text = Prompt.ask("You")
             except (EOFError, KeyboardInterrupt):
                 console.print("\nGoodbye!")
                 break
-
             t = text.strip().lower()
             if t in ("exit", "quit", "q"):
                 console.print("Goodbye!")
@@ -76,9 +72,7 @@ class ChatSession:
         t.add_row("history", "List previous scans")
         t.add_row("exit", "Quit chat")
         console.print(t)
-        console.print("\nOr describe what to check:")
-        console.print('  "check CORS on example.com"')
-        console.print('  "test SQL injection on /search"')
+        console.print('\n  "check CORS on example.com"')
         console.print('  "find subdomains for example.com"')
 
     def _handle_input(self, text: str):
@@ -97,12 +91,35 @@ class ChatSession:
             return
         self._per_loop(text)
 
-    def _per_loop(self, user_input: str, max_rounds: int = 5):
-        """P-E-R loop with spinner + report saving."""
+    def _per_loop(self, user_input: str, max_rounds: int = 6):
+        """P-E-R loop. Loads scan findings if path provided. Saves results to scan dir."""
         self.history.append({"role": "user", "content": user_input})
         avail = ", ".join(sorted(self.tools.available_tools().keys()))
         context = f"Available tools: {avail}"
+
+        # Detect scan directory in input
+        path_match = re.search(r'(/home/[^\s]+output/[^\s]+)', user_input)
+        scan_dir = Path(path_match.group(1)) if path_match else self.last_scan_dir
+
+        # Load existing findings for deeper analysis
+        existing_findings = []
+        if scan_dir:
+            fpath = scan_dir / "analysis" / "findings.json"
+            if fpath.exists():
+                try:
+                    data = json.loads(fpath.read_text())
+                    vulns = data.get("vulnerabilities", [])
+                    for v in vulns[:15]:
+                        existing_findings.append(f"[{v.get('severity','?')}] {v.get('type','?')} @ {v.get('location','?')}")
+                    if existing_findings:
+                        context += "\n\nExisting findings (dive deeper on each):\n" + "\n".join(existing_findings)
+                except Exception:
+                    pass
+
         report_lines = [f"# Chat: {datetime.now().isoformat()[:19]}", f"## Query: {user_input}", ""]
+        if existing_findings:
+            report_lines.append("### Existing Findings")
+            report_lines.extend(existing_findings)
 
         for turn in range(max_rounds):
             messages = [{"role": "system", "content": SYSTEM_PROMPT + "\n\n" + context}]
@@ -119,24 +136,23 @@ class ChatSession:
                 report_lines.append(f"## Result\n{response}\n")
                 break
 
-            # Execute commands
             results = []
             for cmd in commands:
-                with console.status(f"Running: {cmd[:50]}...", spinner="dots"):
+                with console.status(f" Running: {cmd[:50]}...", spinner="dots"):
                     try:
                         if "|" in cmd:
                             import subprocess as sp
                             r = sp.run(cmd, shell=True, capture_output=True, text=True, timeout=60)
                             output = r.stdout + r.stderr
                         else:
-                            parts = shlex.split(cmd)
-                            output = self.tools.run(parts, timeout=60)
+                            output = self.tools.run(shlex.split(cmd), timeout=60)
                     except Exception as e:
                         output = f"(error: {e})"
 
                 console.print(f"  $ {cmd}")
                 preview = output[:500].replace("\n", "\n  ")
-                console.print(f"  {preview}")
+                if preview:
+                    console.print(f"  {preview}")
                 results.append(f"Command: {cmd}\nOutput:\n{output[:2000]}")
 
             report_lines.append(f"### Round {turn+1}")
@@ -145,15 +161,16 @@ class ChatSession:
 
             result_block = "\n---\n".join(results)
             self.history.append({"role": "assistant", "content": response})
-            self.history.append({"role": "user", "content": f"Results:\n{result_block}\n\nNext steps or summary."})
+            self.history.append({"role": "user", "content": f"Results:\n{result_block}\n\nDive deeper. Test more. Give summary when done."})
 
-        # Save report
+        # Save to scan dir (preferred) or chat dir
         try:
-            d = Path("output") / "chat"
-            d.mkdir(parents=True, exist_ok=True)
-            f = d / f"session_{datetime.now().strftime('%H%M%S')}.md"
+            save_dir = scan_dir if scan_dir else Path("output") / "chat"
+            save_dir.mkdir(parents=True, exist_ok=True)
+            f = save_dir / f"chat_{datetime.now().strftime('%H%M%S')}.md"
             f.write_text("\n".join(report_lines))
-            console.print(f"[dim]Results: {f}[/dim]")
+            console.print(f"[dim]Saved: {f}[/dim]")
+            self.last_scan_dir = save_dir
         except Exception:
             pass
 
@@ -182,9 +199,8 @@ class ChatSession:
         url = text.split()[-1]
         if not url.startswith("http"):
             url = "https://" + url
-        ws = Workspace(f"recon")
-        agent = ReconAgent("recon", self.llm, ws, self.tools)
-        agent.run({"target_url": url})
+        ws = Workspace("recon")
+        ReconAgent("recon", self.llm, ws, self.tools).run({"target_url": url})
 
     def _show_report(self):
         if not self.last_scan_dir:
