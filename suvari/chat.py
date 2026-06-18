@@ -254,16 +254,45 @@ class ChatSession:
             pass
 
     def _extract_tool_commands(self, text: str) -> list:
-        """Extract tool commands only from ```tool blocks."""
+        """Extract commands and save code blocks as files."""
         cmds = []
-        # Match ```tool blocks (strict)
+
+        # Save ```python blocks as .py files in output/chat/
+        for m in re.finditer(r'```python\n(.+?)\n```', text, re.DOTALL):
+            code = m.group(1).strip()
+            if code and len(code) > 20:
+                try:
+                    save_dir = Path("output") / "chat" / "exploits"
+                    save_dir.mkdir(parents=True, exist_ok=True)
+                    fname = f"exploit_{datetime.now().strftime('%H%M%S')}.py"
+                    (save_dir / fname).write_text(code)
+                    console.print(f"  [green]Saved exploit: {save_dir / fname}[/green]")
+                    # Also offer to run it
+                    cmds.append(f"python3 {save_dir / fname}")
+                except Exception as e:
+                    console.print(f"  [red]Failed to save exploit: {e}[/red]")
+
+        # Save ```bash blocks as .sh files
+        for m in re.finditer(r'```bash\n(.+?)\n```', text, re.DOTALL):
+            code = m.group(1).strip()
+            if code and len(code) > 20 and any(x in code for x in ["#!/", "chmod", "curl", "wget", "nc", "bash"]):
+                try:
+                    save_dir = Path("output") / "chat" / "scripts"
+                    save_dir.mkdir(parents=True, exist_ok=True)
+                    fname = f"script_{datetime.now().strftime('%H%M%S')}.sh"
+                    (save_dir / fname).write_text(code)
+                    console.print(f"  [green]Saved script: {save_dir / fname}[/green]")
+                except Exception:
+                    pass
+
+        # Match ```tool blocks
         for m in re.finditer(r'```tool\n(.+?)\n```', text, re.DOTALL):
             c = m.group(1).strip()
             if c and not c.startswith("#"):
                 cmds.append(c)
-        # Match ```bash blocks - only accept known tools
+
+        # Match ```bash blocks - only known tools
         if not cmds:
-            # Dynamically get available tools
             known = set(self.tools.available_tools().keys())
             known.update(["cat", "ls", "find", "grep", "head", "tail", "echo", "dig", "ping", "nc", "nslookup", "python3", "python", "ruby", "perl"])
             for m in re.finditer(r'```(?:bash|sh)?\n(.+?)\n```', text, re.DOTALL):
@@ -271,6 +300,7 @@ class ChatSession:
                 first_word = c.split()[0] if c else ""
                 if first_word in known:
                     cmds.append(c)
+
         return cmds[:5]
 
     def _cmd_scan(self, text: str):
