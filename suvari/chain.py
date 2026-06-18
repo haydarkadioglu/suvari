@@ -1,325 +1,300 @@
 """
-Scan Chain — tree-based recursive scanning and attack chains.
-AI decides what to try next based on findings, drills deeper on interesting paths.
+Causal Scan Chain — each step's output determines the next step.
+Inspired by LuaN1aoAgent's causal graph reasoning.
 """
 
 import time
 import json
 from typing import Optional
-from .llm import LLMClient
-from .tools.runner import ToolRunner
-from .workspace import Workspace
-from .prompt_loader import PromptLoader
-from .agents.base import fmt_time
+from dataclasses import dataclass, field
+from suvari.llm import LLMClient
+from suvari.tools.runner import ToolRunner
+from suvari.workspace import Workspace
+from suvari.prompt_loader import PromptLoader
 
-CHAIN_SYSTEM_PROMPT = """You are a penetration testing strategist running a live scan chain.
 
-Current state (findings so far):
+@dataclass
+class CausalStep:
+    """A single step in the causal graph."""
+    tool: str
+    args: list
+    reason: str          # Why this step exists
+    depends_on: list     # Step names that must complete first
+    timeout: int = 60
+    output: str = ""
+    error: str = ""
+    duration: float = 0.0
+    findings: list = field(default_factory=list)
+
+
+CAUSAL_PROMPT = """You are a pentesting AI that reasons causally. Each step depends on previous results.
+
+CURRENT STATE:
 {state}
 
-Available tools: {tools}
+AVAILABLE TOOLS:
+{tools}
 
-Your job is to decide the NEXT action. Think like an attacker:
-1. What's the most promising lead right now?
-2. Should I drill deeper on an existing finding?
-3. Should I try a different tool on the same target?
-4. Are any findings connected? Can I chain them?
-5. Is anything a dead end?
+PREVIOUS STEPS AND OUTPUTS:
+{history}
 
-Return JSON:
-{
-  "action": "drill" or "new" or "chain" or "stop",
-  "tool": "tool_name",
-  "target": "what to target specifically",
-  "args": ["arg1", "arg2"],
-  "reason": "why this action",
-  "confidence": "high/medium/low",
-  "chain_with": ["finding_1", "finding_2"]
-}
+YOUR JOB:
+Based on the current state and previous outputs, decide the NEXT step.
+Think causally: "I found X, so I need to check Y. If Y is true, then Z."
 
-If action is "stop", scanning ends and moves to exploitation.
-If action is "chain", connect findings into an attack path.
+Respond in this format:
+TOOL: <tool_name>
+ARGS: <arg1> <arg2> ...
+REASON: <why this step is needed>
+TIMEOUT: <seconds>
+
+Or if analysis is complete:
+DONE: <summary of findings>
+
+Available tools: nmap, masscan, whatweb, httpx, gobuster, ffuf, feroxbuster, dirb,
+nuclei, nikto, wpscan, sqlmap, hydra, curl
 """
 
 
-class ScanNode:
-    """A single node in the scan tree."""
-    
-    def __init__(self, tool: str, target: str, reason: str, parent: Optional["ScanNode"] = None):
-        self.tool = tool
-        self.target = target
-        self.reason = reason
-        self.parent = parent
-        self.children = []
-        self.output = ""
-        self.status = "pending"
-        self.findings = []
-        self.time = 0.0
-        self.depth = parent.depth + 1 if parent else 0
-
-    def add_child(self, node: "ScanNode"):
-        self.children.append(node)
-
-    def to_dict(self) -> dict:
-        return {
-            "tool": self.tool,
-            "target": self.target,
-            "reason": self.reason,
-            "status": self.status,
-            "time": self.time,
-            "findings": self.findings[:3],
-            "depth": self.depth,
-            "children": [c.to_dict() for c in self.children],
-        }
-
-
-class ScanChain:
-    """Tree-based scan chain execution."""
-
-    TOOL_MAX_TIMES = {
-        "nuclei": 120, "nikto": 150, "gobuster": 90, "ffuf": 90,
-        "sqlmap": 210, "wpscan": 150, "httpx": 30, "curl": 15,
-        "nmap": 90, "hydra": 180, "whatweb": 30, "subfinder": 60,
-        "dnsenum": 60, "enum4linux": 60, "smbmap": 30,
-    }
+class CausalChain:
+    """Causal graph-based scanning. Each step feeds into the next."""
 
     def __init__(self, url: str, llm: LLMClient, tools: ToolRunner, workspace: Workspace,
-                 fast: bool = False, max_depth: int = 3, verbose: bool = False):
+                 max_steps: int = 12):
         self.url = url
         self.llm = llm
         self.tools = tools
         self.ws = workspace
-        self.fast = fast
-        self.max_depth = max_depth
-        self.verbose = verbose
-        self.root = ScanNode("init", url, "Starting scan", parent=None)
-        self.all_findings = []
-        self.chain_log = []
+        self.max_steps = max_steps
+        self.steps: list[CausalStep] = []
+        self.stop_reason = ""
 
-    def _build_cmd(self, tool: str, args: list, target: str) -> list:
-        cmd = [tool] + args
-        if tool in ("nuclei", "gobuster", "ffuf", "sqlmap", "httpx"):
-            cmd += ["-u", target]
-        elif tool in ("nikto", "curl"):
-            cmd += [target]
-        elif tool == "wpscan":
-            cmd += ["--url", target]
-        elif tool == "nmap":
-            cmd += [target.split("://")[-1].split("/")[0]]
-        elif tool in ("subfinder", "dnsenum"):
-            cmd += [target.split("://")[-1].split("/")[0]]
-        elif tool in ("enum4linux", "smbmap"):
-            cmd += [target.split("://")[-1].split("/")[0]]
-        elif tool == "hydra":
-            pass  # Hydra needs specific args
-        return cmd
+    def run(self) -> dict:
+        """Run the causal chain until analysis is complete."""
+        self.log(f"Causal chain: {self.max_steps} steps max")
 
-    def run(self) -> list:
-        """Run the scan chain. Returns all findings."""
-        
-        # Phase 1: Initial recon tools
-        initial_tools = [
-            ("whatweb", [], "Technology fingerprinting"),
-            ("curl", ["-sI"], "HTTP header analysis"),
-        ]
-        if self.tools.check_tool("nmap"):
-            initial_tools.append(("nmap", ["-T4", "-F", "--open"], "Quick port scan"))
-
-        for tool, args, reason in initial_tools:
-            if not self.tools.check_tool(tool):
-                continue
-            node = ScanNode(tool, self.url, reason, self.root)
-            self._execute_node(node, args)
-            self.root.add_child(node)
-
-        # Phase 2: AI-driven chain
-        max_rounds = 5 if self.fast else 12
-        for round_num in range(max_rounds):
-            decision = self._ai_decide()
-            if decision.get("action") == "stop":
-                self.chain_log.append(f"[STOP] AI decided to end scanning")
+        for i in range(self.max_steps):
+            step = self._decide()
+            if step is None:
+                self.log(f"  Analysis complete: {self.stop_reason}")
                 break
 
-            tool = decision.get("tool", "")
-            if not tool or not self.tools.check_tool(tool):
-                continue
+            self.log(f"  Step {i+1}: {step.tool} — {step.reason[:60]}")
+            t0 = time.time()
 
-            target = decision.get("target", self.url)
-            if not target.startswith("http"):
-                target = self.url.rstrip("/") + "/" + target.lstrip("/")
+            cmd = [step.tool] + step.args
+            output = self.tools.run(cmd, timeout=step.timeout)
+            step.duration = time.time() - t0
+            step.output = output[:3000]
 
-            args = decision.get("args", [])
-            reason = decision.get("reason", "AI decision")
+            # Extract findings from output
+            findings = self._extract_findings(step.tool, output)
+            step.findings = findings
 
-            # Find the right parent node for tree building
-            parent = self._find_parent_for_tool(tool)
-            node = ScanNode(tool, target, reason, parent)
-            parent.add_child(node)
+            # Save to workspace
+            name = f"{i+1:02d}_{step.tool}"
+            self.ws.save_result("chain", name, f"# Step {i+1}: {step.tool}\n## Reason\n{step.reason}\n## Output\n{output[:5000]}")
+            if findings:
+                self.ws.save_json("chain", f"{name}_findings", findings)
 
-            self.chain_log.append(f"[{round_num+1}/{max_rounds}] {tool} on {target}: {reason}")
-            
-            if self.verbose:
-                print(f"  Chain: {tool} -> {target} ({reason[:60]})")
+            self.steps.append(step)
 
-            self._execute_node(node, args)
+            if findings:
+                for f in findings[:2]:
+                    self.log(f"    -> {f.get('type','?')}: {f.get('detail','')[:60]}")
 
-            # If findings found, consider drilling deeper
-            if node.findings and node.depth < self.max_depth:
-                for finding in node.findings[:2]:
-                    drill_node = ScanNode("drill", finding, f"Deeper on: {finding[:60]}", node)
-                    self._execute_drill(drill_node, finding)
-                    if drill_node.children:
-                        node.add_child(drill_node)
+        # Aggregate all findings
+        all_findings = []
+        for s in self.steps:
+            all_findings.extend(s.findings)
 
-        return self.all_findings
+        result = {
+            "total_steps": len(self.steps),
+            "duration": sum(s.duration for s in self.steps),
+            "vulnerabilities": self._aggregate_vulns(all_findings),
+            "steps": [
+                {"tool": s.tool, "reason": s.reason, "duration": s.duration, "findings": len(s.findings)}
+                for s in self.steps
+            ],
+        }
+        self.ws.save_json("analysis", "chain_findings", result)
+        return result
 
-    def _execute_node(self, node: ScanNode, args: list):
-        """Execute a single scan node."""
-        max_time = self.TOOL_MAX_TIMES.get(node.tool, 60)
-        cmd = self._build_cmd(node.tool, args, node.target)
-
-        t0 = time.time()
-        output = self.tools.run(cmd, timeout=max_time)
-        elapsed = time.time() - t0
-
-        node.time = elapsed
-        node.output = output[:500]
-        node.status = "OK" if not output.startswith("(") else "ERROR"
-
-        self.ws.save_result("chain", f"{node.tool}_{len(self.chain_log)}", output)
-
-        # Extract findings from output (simple heuristic)
-        if node.status == "OK" and len(output) > 10:
-            node.findings = self._extract_findings(output, node.tool)
-            self.all_findings.extend(node.findings)
-
-    def _execute_drill(self, node: ScanNode, finding: str):
-        """Execute a focused drill on a finding."""
-        # Try deeper tool based on finding type
-        finding_lower = finding.lower()
-
-        if "directory" in finding_lower or "admin" in finding_lower or "backup" in finding_lower:
-            if self.tools.check_tool("gobuster"):
-                target = self.url.rstrip("/") + "/" + finding.split("/")[-1]
-                n = ScanNode("gobuster", target, f"Deep dir scan: {finding[:40]}", node)
-                self._execute_node(n, ["dir", "-w", "/usr/share/wordlists/dirb/common.txt", "-t", "20", "-q"])
-                node.add_child(n)
-
-        if "sql" in finding_lower or "database" in finding_lower or "mysql" in finding_lower:
-            if self.tools.check_tool("sqlmap"):
-                n = ScanNode("sqlmap", node.target, f"SQLi check: {finding[:40]}", node)
-                self._execute_node(n, ["--batch", "--random-agent", "--time-sec", "3"])
-                node.add_child(n)
-
-        if "ssh" in finding_lower or "password" in finding_lower:
-            if self.tools.check_tool("hydra"):
-                host = node.target.split("://")[-1].split("/")[0]
-                n = ScanNode("hydra", host, f"Brute force: {finding[:40]}", node)
-                self._execute_node(n, ["-l", "root", "-P", "/usr/share/wordlists/rockyou.txt.gz", "ssh"])
-                node.add_child(n)
-
-    def _ai_decide(self) -> dict:
-        """Ask AI what to do next. Robust parsing: tries JSON first, then keyword fallback."""
-        state_text = self._build_state()
+    def _decide(self) -> Optional[CausalStep]:
+        """Ask AI what to do next based on current state."""
+        state = self._build_state()
+        history = self._build_history()
         avail = self.tools.available_tools()
-        prompt = CHAIN_SYSTEM_PROMPT.format(
-            state=state_text[:2000],
-            tools=", ".join(avail.keys()) or "none",
+        tool_names = ", ".join(sorted(avail.keys()))
+
+        prompt = CAUSAL_PROMPT.format(
+            state=state or "Initial scan. No data yet.",
+            tools=tool_names,
+            history=history or "No previous steps.",
         )
 
         try:
-            # Step 1: Try to get plain text response
-            raw = self.llm.chat(
+            text = self.llm.chat(
                 messages=[{"role": "user", "content": prompt}],
-                temperature=0.3, max_tokens=512,
+                temperature=0.2,
+                max_tokens=256,
             )
-
-            # Step 2: Try JSON parsing
-            text = raw.strip()
-            if text.startswith("```"):
-                text = text.split("\n", 1)[1] if "\n" in text else text[3:]
-            if text.endswith("```"):
-                text = text[:-3].strip()
-            if text.startswith("json"):
-                text = text[4:].strip()
-            if text.startswith("n") or text.startswith("'"):
-                text = text.strip("'\n ")  # Remove stray quotes/newlines
-
-            try:
-                parsed = json.loads(text)
-                if isinstance(parsed, dict):
-                    return parsed
-                # If it's just a string, convert to action
-                if isinstance(parsed, str) and parsed.lower() in ("stop", "done", "continue"):
-                    return {"action": parsed.lower(), "reason": raw[:100]}
-            except json.JSONDecodeError:
-                pass
-
-            # Step 3: Keyword-based fallback
-            text_lower = text.lower()
-            decision = {"action": "continue", "reason": raw[:100]}
-
-            # Check for stop signals
-            if any(w in text_lower for w in ["stop", "done", "complete", "finished", "no more"]):
-                decision["action"] = "stop"
-                return decision
-
-            # Extract tool name
-            for tool_name in avail:
-                if tool_name in text_lower:
-                    decision["tool"] = tool_name
-                    decision["action"] = "continue"
-                    # Extract target if mentioned
-                    if "target" in text_lower or "on " in text_lower:
-                        decision["target"] = self.url
-                    return decision
-
-            # If we get here with no tool, stop
-            decision["action"] = "stop"
-            return decision
-
         except Exception as e:
-            return {"action": "stop", "reason": f"AI error: {e}"}
+            self.stop_reason = f"AI unavailable: {e}"
+            return None
+
+        # Parse response
+        clean = text.strip()
+        if clean.upper().startswith("DONE"):
+            self.stop_reason = clean[4:].strip() or "AI analysis complete"
+            return None
+
+        # Extract TOOL, ARGS, REASON
+        tool = self._extract_field(clean, "TOOL")
+        if not tool:
+            self.stop_reason = "No tool specified"
+            return None
+
+        args_str = self._extract_field(clean, "ARGS") or ""
+        args = args_str.split() if args_str else []
+        reason = self._extract_field(clean, "REASON") or f"Step {len(self.steps)+1}"
+        timeout_str = self._extract_field(clean, "TIMEOUT") or "60"
+
+        try:
+            timeout = int(timeout_str)
+        except ValueError:
+            timeout = 60
+
+        # Check tool availability
+        if tool not in avail and tool != "curl":
+            # Try to find closest match
+            for t in avail:
+                if tool in t or t in tool:
+                    tool = t
+                    break
+            else:
+                self.stop_reason = f"Tool not found: {tool}"
+                return None
+
+        return CausalStep(
+            tool=tool,
+            args=args,
+            reason=reason,
+            depends_on=[s.tool for s in self.steps[-3:]],  # Depends on recent steps
+            timeout=min(timeout, 120),
+        )
+
+    def _extract_field(self, text: str, field: str) -> str:
+        """Extract field value from AI response."""
+        for line in text.split("\n"):
+            line = line.strip()
+            if line.upper().startswith(field + ":"):
+                return line[len(field)+1:].strip()
+            if line.upper().startswith(field + " "):
+                return line[len(field)+1:].strip()
+        return ""
 
     def _build_state(self) -> str:
-        """Build current state summary for AI."""
-        parts = [f"Target: {self.url}"]
-        parts.append(f"\nFindings ({len(self.all_findings)}):")
-        for f in self.all_findings[-10:]:
-            parts.append(f"  - {f[:120]}")
-        parts.append(f"\nChain log ({len(self.chain_log)} steps):")
-        for log in self.chain_log[-5:]:
-            parts.append(f"  {log}")
+        """Build current state description from findings."""
+        if not self.steps:
+            return ""
+        parts = []
+        for s in self.steps[-5:]:
+            parts.append(f"{s.tool}: {s.reason[:80]}")
+            if s.findings:
+                for f in s.findings[:2]:
+                    parts.append(f"  -> {f.get('detail','')[:80]}")
         return "\n".join(parts)
 
-    def _find_parent_for_tool(self, tool: str) -> ScanNode:
-        """Find the best parent node for a tool based on context."""
-        if not self.root.children:
-            return self.root
-        # Find last successful node
-        for child in reversed(self.root.children):
-            if child.status == "OK":
-                return child
-        return self.root.children[-1] if self.root.children else self.root
+    def _build_history(self) -> str:
+        """Build step history."""
+        if not self.steps:
+            return ""
+        return "\n".join([
+            f"Step {i+1}: {s.tool} ({s.duration:.0f}s) - {s.reason[:60]}"
+            for i, s in enumerate(self.steps)
+        ])
 
-    def _extract_findings(self, output: str, tool: str) -> list:
-        """Extract potential findings from tool output."""
+    def _extract_findings(self, tool: str, output: str) -> list:
+        """Extract relevant findings from tool output."""
         findings = []
-        lines = output.split("\n")
-        for line in lines:
-            line = line.strip()
-            if not line:
-                continue
-            # Skip common noise
-            if any(x in line for x in ["Starting", "ending", "Completed", "Copyright", "License"]):
-                continue
-            if len(line) < 15:
-                continue
-            # Check for finding-like patterns
-            if any(kw in line.lower() for kw in [
-                "found", "vulnerable", "cve-", "open", "exposed", "admin",
-                "login", "password", "sql", "xss", "rce", "lfi", "ssrf",
-                "200 ok", "301", "302", "directory listing",
-            ]):
-                findings.append(line[:150])
+        out_lower = output.lower()
+
+        # Port findings
+        if tool == "nmap" or tool == "masscan":
+            for line in output.split("\n"):
+                if "/tcp" in line or "/udp" in line:
+                    parts = line.strip().split()
+                    if len(parts) >= 2:
+                        findings.append({
+                            "type": "port",
+                            "detail": parts[0],
+                            "raw": line.strip()[:100],
+                        })
+
+        # Technology findings
+        if tool == "whatweb":
+            for line in output.split("\n"):
+                if "[" in line and "]" in line:
+                    findings.append({
+                        "type": "technology",
+                        "detail": line.strip()[:100],
+                        "raw": line.strip(),
+                    })
+
+        # Vulnerability findings
+        if tool == "nuclei":
+            for line in output.split("\n"):
+                if "[critical]" in out_lower or "[high]" in out_lower or "[medium]" in out_lower:
+                    findings.append({
+                        "type": "vulnerability",
+                        "detail": line.strip()[:100],
+                        "raw": line.strip(),
+                    })
+
+        # HTTP findings
+        if tool == "curl":
+            for line in output.split("\n"):
+                if "access-control" in out_lower:
+                    findings.append({
+                        "type": "cors",
+                        "detail": line.strip()[:100],
+                        "raw": line.strip(),
+                    })
+                if "x-frame-options" not in out_lower and "content-security-policy" not in out_lower:
+                    findings.append({
+                        "type": "missing_header",
+                        "detail": "Security headers missing",
+                    })
+
         return findings[:5]
+
+    def _aggregate_vulns(self, findings: list) -> list:
+        """Convert chain findings to vulnerability format."""
+        vulns = []
+        for f in findings:
+            if f["type"] == "vulnerability":
+                vulns.append({
+                    "severity": "HIGH" if "[critical]" in f.get("raw","").lower() else "MEDIUM",
+                    "type": f.get("detail","")[:80],
+                    "location": self.url,
+                    "source": "causal_chain",
+                })
+            elif f["type"] == "cors":
+                vulns.append({
+                    "severity": "HIGH",
+                    "type": "Cross-Origin Resource Sharing (CORS)",
+                    "location": self.url,
+                    "source": "causal_chain",
+                })
+            elif f["type"] == "missing_header":
+                vulns.append({
+                    "severity": "LOW",
+                    "type": f.get("detail",""),
+                    "location": self.url,
+                    "source": "causal_chain",
+                })
+        return vulns[:10]
+
+    def log(self, msg: str):
+        print(f"  {msg}")

@@ -194,6 +194,9 @@ class SuvariOrchestrator:
                 scan_futures[pool.submit(self._run_browser)] = "browser"
                 scan_futures[pool.submit(self._run_cve_intel)] = "cve"
                 scan_futures[pool.submit(self._run_scanner)] = "scanner"
+                # Causal chain runs alongside (if chain_mode)
+                if self.chain_mode:
+                    scan_futures[pool.submit(self._run_causal_chain)] = "chain"
 
                 for fut in as_completed(scan_futures):
                     name = scan_futures[fut]
@@ -363,6 +366,21 @@ class SuvariOrchestrator:
         except Exception:
             pass
         return findings
+
+    def _run_causal_chain(self) -> dict:
+        """Run causal graph chain scan (runs in parallel with scanner)."""
+        from .chain import CausalChain
+        console = Console()
+        console.print("  Causal chain: reasoning step by step")
+        try:
+            chain = CausalChain(self.target_url, self.llm, self.tools, self.ws, max_steps=8)
+            results = chain.run()
+            if results.get("vulnerabilities"):
+                console.print(f"  Chain: {len(results['vulnerabilities'])} findings")
+            return results
+        except Exception as e:
+            console.print(f"  Chain error: {e}")
+            return {}
 
     def _run_scanner(self) -> dict:
         """Scanner task (runs in parallel)."""
