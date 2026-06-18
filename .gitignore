@@ -32,3 +32,11 @@ Thumbs.db
 
 # Config (keys are in ~/.config/suvari/, not here)
 config.json
+
+# Sensitive
+*.token
+gh_token*.txt
+tmp_*.txt
+/tmp/
+credentials*
+secrets*
