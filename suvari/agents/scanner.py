@@ -109,8 +109,9 @@ class ScannerAgent(BaseAgent):
             tool_plan = parse_ai_tool_plan(response, avail)
             self.log(f"  Plan ready ({fmt_time(time.time() - t0)}): {[t['tool'] for t in tool_plan]}")
         except Exception as e:
-            self.log(f"  AI plan error: {e}, fallback")
-            tool_plan = [{"tool": "nuclei", "args": ["-silent", "-severity", "critical,high,medium"], "reason": "Fallback"}]
+            self.log(f"[RED] AI PLAN FAILED: {e}[/RED]")
+            self.log(f"[RED] Check API key or network. Using fallback (nuclei only).[/RED]")
+            tool_plan = [{"tool": "nuclei", "args": ["-silent", "-severity", "critical,high,medium"], "reason": "Fallback (AI unavailable)"}]
 
         # No artificial limits - use all tools AI recommends
         tool_plan = tool_plan[:20]  # Safety cap at 20 (practical limit)

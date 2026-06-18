@@ -1,6 +1,6 @@
 """
 Analyzer Agent — AI-powered analysis of scan results with robust text parsing.
-No JSON dependency — extracts structured findings from plain text.
+Shows clear errors when AI is unavailable.
 """
 
 import time
@@ -33,10 +33,9 @@ class AnalyzerAgent(BaseAgent):
             for k, v in scan_results.items() if isinstance(v, str)
         ])
 
-        # Combine all data for AI
         extra = ""
         if browser_info:
-            extra += f"\n\nBrowser Info: {browser_info.get('title','')} | Tech: {browser_info.get('tech',[])} | Forms: {browser_info.get('forms',0)}"
+            extra += f"\n\nBrowser: {browser_info.get('title','')} | Tech: {browser_info.get('tech',[])}"
         if cve_findings:
             for c in cve_findings[:3]:
                 extra += f"\nCVE: {c.get('cve_id','?')} ({c.get('cvss','')}) - {c.get('description','')[:100]}"
@@ -54,45 +53,43 @@ class AnalyzerAgent(BaseAgent):
         t0 = time.time()
 
         try:
-            # Plain text AI response (no JSON dependency)
             response = self.llm.chat(
                 messages=[{"role": "user", "content": system_prompt}],
                 temperature=0.1,
                 max_tokens=2048,
             )
-
-            # Try to parse as JSON first (best effort)
-            vulnerabilities = self._extract_vulnerabilities(response, url)
-            elapsed = fmt_time(time.time() - t0)
-
-            sev_count = {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0}
-            for v in vulnerabilities:
-                s = v.get("severity", "low").lower()
-                if s in sev_count:
-                    sev_count[s] += 1
-
-            result = {
-                "vulnerabilities": vulnerabilities,
-                "summary": {"total": len(vulnerabilities), **sev_count},
-                "raw_analysis": response[:1000],
-            }
-            self.ws.save_json("analysis", "findings", result)
-            self.log(f"     [OK] Analysis done in {elapsed} — {len(vulnerabilities)} findings")
-            return result
-
-        except Exception as e:
-            self.log(f"  [WARN] Analysis error: {e}")
+        except Exception as api_err:
+            self.log(f"[AI UNAVAILABLE] {api_err}")
+            self.log("[AI UNAVAILABLE] Scan completed without AI analysis. Check API key.")
             return {
                 "vulnerabilities": [],
-                "error": str(e),
+                "error": str(api_err),
+                "ai_available": False,
                 "summary": {"total": 0, "critical": 0, "high": 0, "medium": 0, "low": 0},
             }
+
+        vulnerabilities = self._extract_vulnerabilities(response, url)
+        elapsed = fmt_time(time.time() - t0)
+
+        sev_count = {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0}
+        for v in vulnerabilities:
+            s = v.get("severity", "low").lower()
+            if s in sev_count:
+                sev_count[s] += 1
+
+        result = {
+            "vulnerabilities": vulnerabilities,
+            "summary": {"total": len(vulnerabilities), **sev_count},
+            "raw_analysis": response[:1000],
+        }
+        self.ws.save_json("analysis", "findings", result)
+        self.log(f"     [OK] Analysis done in {elapsed} — {len(vulnerabilities)} findings")
+        return result
 
     def _extract_vulnerabilities(self, text: str, target_url: str) -> list:
         """Extract vulnerabilities from AI's plain text response."""
         vulns = []
 
-        # Try JSON parsing first
         cleaned = text.strip()
         if cleaned.startswith("```"):
             cleaned = cleaned.split("\n", 1)[1] if "\n" in cleaned else cleaned[3:]
@@ -108,40 +105,26 @@ class AnalyzerAgent(BaseAgent):
             except json.JSONDecodeError:
                 pass
 
-        # Fallback: keyword extraction
         lines = text.split("\n")
-        current_vuln = {}
-
         severity_indicators = {
-            "CRITICAL": "CRITICAL", "critical": "CRITICAL", "🔥": "CRITICAL",
-            "HIGH": "HIGH", "high": "HIGH", "⚠️": "HIGH",
-            "MEDIUM": "MEDIUM", "medium": "MEDIUM", "📌": "MEDIUM",
-            "LOW": "LOW", "low": "LOW", "ℹ️": "LOW",
-            "INFO": "INFO", "info": "INFO",
+            "CRITICAL": "CRITICAL", "HIGH": "HIGH", "MEDIUM": "MEDIUM",
+            "LOW": "LOW", "INFO": "INFO",
         }
 
         for line in lines:
             line = line.strip()
             if not line:
                 continue
-
-            # Check for finding patterns: [SEVERITY] Type: description
             for indicator, sev in severity_indicators.items():
                 if indicator in line:
-                    match = re.match(rf'.*?\[?{re.escape(indicator)}\]?\s*[:\-–]\s*(.*)', line)
-                    text_after = match.group(1) if match else line
-                    # Split type and description
-                    parts = text_after.split(":", 1) if ":" in text_after else [text_after, ""]
+                    parts = line.split(":", 1) if ":" in line else [line, ""]
                     vulns.append({
                         "severity": sev,
                         "type": parts[0].strip()[:80],
                         "location": parts[1].strip()[:120] if len(parts) > 1 else target_url,
                         "description": line[:200],
-                        "confidence": "medium",
                     })
                     break
-
-            # Also look for "- Type" patterns (bullet points)
             if line.startswith("- ") and ":" in line:
                 left, right = line[2:].split(":", 1)
                 vulns.append({
@@ -149,7 +132,6 @@ class AnalyzerAgent(BaseAgent):
                     "type": left.strip()[:80],
                     "location": right.strip()[:120],
                     "description": line[:200],
-                    "confidence": "low",
                 })
 
-        return vulns[:15]
+        return vulns[:20]
