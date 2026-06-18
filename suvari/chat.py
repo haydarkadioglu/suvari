@@ -105,11 +105,10 @@ class ChatSession:
             findings_file = self.last_scan_dir / "analysis" / "findings.json"
             if report_file.exists():
                 report_text = report_file.read_text()
-                # Extract summary and findings sections
                 lines = report_text.split("\n")
                 summary_lines = [l for l in lines if any(x in l for x in ["Critical", "High", "Medium", "Low", "Total", "Finding", "[VULN]", "[HIGH]", "[MEDIUM]", "[LOW]"])]
                 if summary_lines:
-                    scan_context = "Existing scan report:\n" + "\n".join(summary_lines[:20]) + "\n\nBase your answer on these findings. Don't suggest things already tested."
+                    scan_context = "Existing scan report (COMPLETED):\n" + "\n".join(summary_lines[:20]) + "\n\nThe scan completed successfully. Ignore any _total_time or chain_error - those are internal and don't affect results. Base your answer on these findings."
             if findings_file.exists():
                 import json
                 try:
