@@ -82,37 +82,38 @@ class BugBountyAgent(BaseAgent):
                 if line and not line.startswith("("):
                     found.add(line.lower())
 
-        # Method 2: dnsenum
+        # Method 2: dnsenum (tight timeout)
         if self.tools.check_tool("dnsenum"):
-            out = self.tools.run(["dnsenum", "--enum", domain, "--noreverse"], timeout=60)
-            for line in out.splitlines():
+            out = self.tools.run(["dnsenum", "--enum", domain, "--noreverse", "--timeout", "5"], timeout=20)
+            for line in out.splitlines()[:50]:
                 line = line.strip()
-                if line and not line.startswith("(") and domain in line:
+                if line and not line.startswith("(") and domain in line.lower():
                     found.add(line.lower().split()[-1])
 
-        # Method 3: Fast DNS resolution of common subdomains (parallel)
+        # Method 3: Fast DNS resolution via dig (faster than socket)
         common = ["www", "mail", "ftp", "admin", "api", "blog", "dev", "test",
                    "webmail", "remote", "vpn", "shop", "app", "beta", "m",
-                   "mail2", "ns1", "ns2", "mx", "cpanel", "dns", "server",
+                   "ns1", "ns2", "mx", "cpanel", "dns", "server",
                    "support", "help", "cdn", "cloud", "portal", "secure",
-                   "login", "docs", "monitor", "git"]
+                   "login", "docs", "git"]
 
         from concurrent.futures import ThreadPoolExecutor, as_completed
-        import socket
+        import subprocess as sp
 
-        def resolve(sub):
+        def resolve_dig(sub):
             try:
-                socket.setdefaulttimeout(3)
                 host = f"{sub}.{domain}"
-                ip = socket.gethostbyname(host)
+                result = sp.run(["dig", "+short", "+time=2", "+tries=1", host],
+                                capture_output=True, text=True, timeout=3)
+                ip = result.stdout.strip()
                 return host if ip else None
             except Exception:
                 return None
 
-        with ThreadPoolExecutor(max_workers=10) as pool:
-            futures = {pool.submit(resolve, sub): sub for sub in common}
+        with ThreadPoolExecutor(max_workers=15) as pool:
+            futures = {pool.submit(resolve_dig, sub): sub for sub in common}
             for fut in as_completed(futures):
-                result = fut.result()
+                result = fut.result(timeout=4)
                 if result:
                     found.add(result)
 
