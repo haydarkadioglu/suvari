@@ -244,6 +244,16 @@ class SuvariOrchestrator:
                     sub = ExploiterAgent("delegated", self.llm, sub_ws, self.tools)
                     sub.run({"target_url": self.target_url, "analysis": {"vulnerabilities": [vuln]}})
 
+            # Attack chain discovery
+            from .attack_chain import AttackChain
+            chainer = AttackChain(self.llm)
+            chains = chainer.discover(vulnerabilities, self.context.get("recon_results"))
+            if chains:
+                self.context["attack_chains"] = chains
+                console.print(f"  Attack chains: {len(chains)} found")
+                for c in chains:
+                    console.print(f"    [{c.get('confidence','?')}] {c['chain']}")
+
             # Recalculate summary from actual vulnerability list
             sev_count = {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0}
             for v in vulnerabilities:
