@@ -77,13 +77,19 @@ class ChatSession:
 
     def _handle_input(self, text: str):
         t = text.strip().lower()
+
+        # Detect scan directory path first
+        path_match = re.search(r'(/home/[^\s]*output/[^\s]+)', text)
+        if path_match:
+            self.last_scan_dir = Path(path_match.group(1))
+
         if t.startswith("scan "):
             self._cmd_scan(text)
             return
         if t.startswith("recon "):
             self._cmd_recon(text)
             return
-        if any(kw in t for kw in ["rapor", "report", "findings", "bulgular"]):
+        if t in ("rapor", "report", "findings", "bulgular"):
             self._show_report()
             return
         if t in ("history", "scans", "list"):
