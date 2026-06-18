@@ -249,15 +249,28 @@ class ChatSession:
             pass
 
     def _extract_tool_commands(self, text: str) -> list:
+        """Extract tool commands only from ```tool blocks. Ignore plain text."""
         cmds = []
+        # Only match ```tool blocks (strict)
         for m in re.finditer(r'```tool\n(.+?)\n```', text, re.DOTALL):
             c = m.group(1).strip()
-            if c:
+            if c and not c.startswith("#"):
                 cmds.append(c)
+        # Also match ```bash blocks with actual commands (not analysis text)
         if not cmds:
             for m in re.finditer(r'```(?:bash|sh)?\n(.+?)\n```', text, re.DOTALL):
                 c = m.group(1).strip()
-                if c and not c.startswith("#"):
+                # Only accept if it starts with a known tool or common command prefix
+                known = ["curl", "nmap", "nuclei", "gobuster", "whatweb", "wafw00f",
+                         "sqlmap", "hydra", "ffuf", "nikto", "wpscan", "dig", "ping",
+                         "nc", "nslookup", "python3", "python", "ruby", "perl",
+                         "cat", "ls", "find", "grep", "head", "tail", "echo",
+                         "wget", "masscan", "dnsenum", "dnsrecon", "fierce", "enum4linux",
+                         "smbmap", "responder", "rpcclient", "theharvester", "amass",
+                         "netexec", "john", "hashcat", "feroxbuster", "dirb",
+                         "httpx", "wpscan", "nikto", "openssl"]
+                first_word = c.split()[0] if c else ""
+                if first_word in known:
                     cmds.append(c)
         return cmds[:5]
 
