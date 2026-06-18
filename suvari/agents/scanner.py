@@ -1,3 +1,59 @@
+"""Scanner Agent — runs security scanning tools in parallel."""
+
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from .base import BaseAgent, fmt_time
+
+
+class ScannerAgent(BaseAgent):
+    """Runs vulnerability scanning tools against the target."""
+
+    def run(self, context: dict) -> dict:
+        url = context.get("target_url", "")
+        fast = context.get("fast", False)
+        self.log(f"Scanning: {url} (fast={fast})")
+
+        results = {}
+        total_start = time.time()
+
+        # Define scan tasks based on speed
+        core_tools = [
+            ("nuclei", ["nuclei", "-u", url, "-silent", "-severity", "low,medium,high,critical"], 120),
+            ("nikto", ["nikto", "-h", url, "-nointeractive"], 120),
+        ]
+        if not fast:
+            core_tools += [
+                ("gobuster", ["gobuster", "dir", "-u", url, "-w", "/usr/share/wordlists/dirb/common.txt", "-q", "-t", "20"], 90),
+                ("whatweb", ["whatweb", url, "--log-verbose=/dev/null"], 30),
+            ]
+
+        with ThreadPoolExecutor(max_workers=3) as executor:
+            futures = {}
+            for name, cmd, timeout in core_tools:
+                if self.tools.check_tool(name.split("_")[0]):
+                    t = time.time()
+                    fut = executor.submit(self.tools.run, cmd, timeout)
+                    futures[fut] = (name, t)
+                else:
+                    results[name] = "(not installed)"
+
+            for fut in as_completed(futures):
+                name, submit_time = futures[fut]
+                try:
+                    output = fut.result()
+                except Exception as e:
+                    output = f"(error: {e})"
+                elapsed = fmt_time(time.time() - submit_time)
+                self.log(f"  {name} done in {elapsed}")
+                self.ws.save_result("scan", name, output)
+                results[name] = output
+
+        total = fmt_time(time.time() - total_start)
+        self.log(f"Scan complete in {total}")
+        results["_total_time"] = total
+        return results
+
+
 def parse_ai_tool_plan(text: str, available: dict) -> list:
     """Parse AI response to extract tool plan. JSON-first, then keyword fallback."""
     import json as _json

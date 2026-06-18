@@ -1,0 +1,4 @@
+# Nmap 7.99 scan initiated Thu Jun 18 22:23:22 2026 as: /usr/lib/nmap/nmap --privileged -p- -T4 --min-rate=1000 -oN full_port_scan.txt <target_ip>
+Failed to resolve "<target_ip>".
+WARNING: No targets were specified, so 0 hosts scanned.
+# Nmap done at Thu Jun 18 22:23:23 2026 -- 0 IP addresses (0 hosts up) scanned in 0.52 seconds

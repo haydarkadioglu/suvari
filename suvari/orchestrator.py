@@ -209,6 +209,20 @@ class SuvariOrchestrator:
                                 self.context["cve_findings"] = result
                         elif name == "scanner":
                             self.context["scan_results"] = result
+                            # Delegate exploitation chain for findings
+                            if result and isinstance(result, dict):
+                                vulns = result.get("vulnerabilities", [])
+                                for vuln in vulns[:3]:
+                                    sev = vuln.get("severity", "")
+                                    if sev in ("CRITICAL", "HIGH"):
+                                        from .agents.exploiter import ExploiterAgent
+                                        from .workspace import Workspace
+                                        sub_ws = Workspace(f"delegated-{vuln.get('type','')[:20]}")
+                                        sub = ExploiterAgent("delegated", self.llm, sub_ws, self.tools)
+                                        sub.run({"target_url": self.target_url, "analysis": {"vulnerabilities": [vuln]}})
+                        elif name == "chain":
+                            if result and result.get("vulnerabilities"):
+                                self.context.setdefault("chain_findings", []).extend(result["vulnerabilities"])
                     except Exception as e:
                         console.print(f"  {name} error: {e}")
 
