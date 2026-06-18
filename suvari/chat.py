@@ -101,24 +101,38 @@ class ChatSession:
         # Load existing findings into context for AI
         scan_context = ""
         if self.last_scan_dir:
-            report_file = self.last_scan_dir / "report.md"
             findings_file = self.last_scan_dir / "analysis" / "findings.json"
-            if report_file.exists():
-                report_text = report_file.read_text()
-                lines = report_text.split("\n")
-                summary_lines = [l for l in lines if any(x in l for x in ["Critical", "High", "Medium", "Low", "Total", "Finding", "[VULN]", "[HIGH]", "[MEDIUM]", "[LOW]"])]
-                if summary_lines:
-                    scan_context = "Existing scan report (COMPLETED):\n" + "\n".join(summary_lines[:20]) + "\n\nThe scan completed successfully. Ignore any _total_time or chain_error - those are internal and don't affect results. Base your answer on these findings."
+            report_file = self.last_scan_dir / "report.md"
+
+            # First try findings.json (structured data)
             if findings_file.exists():
-                import json
                 try:
+                    import json
                     data = json.loads(findings_file.read_text())
                     vulns = data.get("vulnerabilities", [])
                     if vulns:
-                        vuln_text = "\n".join([f"  [{v.get('severity','?')}] {v.get('type','?')} @ {v.get('location','?')}" for v in vulns[:10]])
-                        scan_context += f"\nConfirmed vulnerabilities:\n{vuln_text}"
+                        vuln_lines = []
+                        for v in vulns[:20]:
+                            sev = v.get("severity", "?")
+                            typ = v.get("type", "?")
+                            loc = v.get("location", "?")
+                            desc = v.get("description", "")
+                            vuln_lines.append(f"[{sev}] {typ} @ {loc}")
+                            if desc:
+                                vuln_lines.append(f"      {desc[:150]}")
+                        scan_context = "Existing findings from scan (COMPLETED):\n" + "\n".join(vuln_lines)
+                        scan_context += "\n\nThe scan completed successfully. Base your answers on these actual findings."
                 except Exception:
                     pass
+
+            # Fallback: read report.md
+            if not scan_context and report_file.exists():
+                text = report_file.read_text()
+                lines = text.split("\n")
+                summary = [l for l in lines if any(x in l for x in ["Critical", "High", "Medium", "Low", "Total", "[VULN]", "[HIGH]", "[CRITICAL]"])]
+                if summary:
+                    scan_context = "Existing scan report (COMPLETED):\n" + "\n".join(summary[:20])
+                    scan_context += "\n\nIgnore _total_time or chain_error. Scan completed."
 
         t = clean_text.lower()
 
