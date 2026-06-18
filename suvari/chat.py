@@ -20,20 +20,23 @@ console = Console()
 
 SYSTEM_PROMPT = """You are Suvari, an AI-powered pentesting assistant. You have access to security tools.
 
+YOUR JOB:
+Run actual security tests. Don't just read files - use tools like curl, nmap, nuclei, whatweb, gobuster, etc.
+
 HOW TO USE TOOLS:
-If you need to run a command, write it in a code block with language "tool":
+Write commands in code blocks with language "tool":
 ```tool
+curl -sI https://example.com
 nmap -F example.com
 ```
 
-After you run a command, you'll see the output. Then you can run more commands or give a final response.
-
 RULES:
-- Be concise. Final response: 2-3 sentences.
-- Actually test things, don't just describe them.
-- If there are existing scan findings, dive deeper on each one.
-- For report queries: say "read the report" and the system will show it.
-- Never say "I'll check" - just do it with tools.
+- Run 3-5 different tests per round. Check headers, endpoints, technologies.
+- If given existing findings, verify each one with actual tool execution.
+- Don't stop after 1 test - keep digging until you've checked everything relevant.
+- Look for: CORS, missing headers, exposed files, information disclosure, SQLi, XSS.
+- Final response: concise summary of findings. List what's vulnerable and what's safe.
+- Never say "I'll check" - just run the tools.
 - Respond in the same language as the user.
 """
 
@@ -167,7 +170,11 @@ class ChatSession:
 
             result_block = "\n---\n".join(results)
             self.history.append({"role": "assistant", "content": response})
-            self.history.append({"role": "user", "content": f"Results:\n{result_block}\n\nDive deeper. Test more. Give summary when done."})
+            # Push for more testing unless there's been substantial analysis
+            more_msg = f"Results:\n{result_block}\n\nKeep testing. Check more endpoints, different methods, deeper analysis. Run at least 3-5 more commands."
+            if turn >= max_rounds - 2:
+                more_msg = f"Results:\n{result_block}\n\nFinal round. Give comprehensive summary of all findings."
+            self.history.append({"role": "user", "content": more_msg})
 
         # Save to scan dir (preferred) or chat dir
         try:
