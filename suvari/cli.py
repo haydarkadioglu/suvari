@@ -215,6 +215,7 @@ def attack(
         import json
         findings = json.loads(findings_file.read_text())
 
+    import json
     vulns = findings.get("vulnerabilities", [])
     if not vulns:
         console.print("[yellow]No vulnerabilities found in scan results. Nothing to attack.[/yellow]")
@@ -224,21 +225,60 @@ def attack(
     for v in vulns:
         console.print(f"  [{v.get('severity','?')}] {v.get('type','?')} — {v.get('location','')}")
 
-    # Run exploitation
+    # Run P-E-R exploitation loop (10 rounds max)
     cfg = load_config()
     prov, mod = _resolve_provider(provider, model)
     llm = LLMClient(provider=prov, model=mod)
     ws = Workspace(f"attack-{scan_dir.name}")
     tr = ToolRunner()
-    agent = ExploiterAgent("exploiter", llm, ws, tr)
+    avail = ", ".join(sorted(tr.available_tools().keys()))
 
-    context = {
-        "target_url": vulns[0].get("location", "").split("/")[0] if vulns else "",
-        "analysis": findings,
-        "fast": False,
-    }
+    target = vulns[0].get("location", "").split("/")[0] if vulns else "https://example.com"
+    history = [{"role": "user", "content": f"Existing findings: {json.dumps(findings, indent=2)[:2000]}\n\nExploit each finding using appropriate tools. Available: {avail}. Run actual exploitation commands and verify results."}]
 
-    results = agent.run(context)
+    from rich.progress import Progress, SpinnerColumn, TextColumn
+    console.print()
+
+    for turn in range(10):
+        with Progress(SpinnerColumn(), TextColumn("[progress.description]{task.description}"), console=console) as progress:
+            task = progress.add_task(f"Planning round {turn+1}...", total=None)
+            response = llm.chat(messages=[{"role": "system", "content": f"You are an exploitation specialist. Verify findings by running actual security tools. Available: {avail}. Use ```tool blocks for commands. Be thorough."}] + history[-8:],
+                              temperature=0.3, max_tokens=1024, stream=False)
+            progress.update(task, description=f"Exploiting round {turn+1}...")
+
+        # Extract and run commands
+        cmds = []
+        for m in __import__('re').finditer(r'```tool\n(.+?)\n```', response, __import__('re').DOTALL):
+            c = m.group(1).strip()
+            if c:
+                cmds.append(c)
+        if not cmds:
+            console.print(response)
+            history.append({"role": "assistant", "content": response})
+            break
+
+        with Progress(SpinnerColumn(), TextColumn("[progress.description]{task.description}"), console=console) as progress:
+            for cmd in cmds:
+                task = progress.add_task(f"  Running: {cmd[:60]}...", total=None)
+                try:
+                    if "|" in cmd:
+                        import subprocess as sp
+                        r = sp.run(cmd, shell=True, capture_output=True, text=True, timeout=120)
+                        output = r.stdout[:1500] + r.stderr[:500]
+                    else:
+                        import shlex
+                        output = tr.run(shlex.split(cmd), timeout=120)[:2000]
+                except Exception as e:
+                    output = f"(error: {e})"
+                console.print(f"  $ {cmd}")
+                progress.update(task, description="[green]Done[/green]")
+                preview = output[:400].replace("\n", "\n  ")
+                if preview:
+                    console.print(f"  {preview}")
+
+        history.append({"role": "assistant", "content": response})
+        history.append({"role": "user", "content": f"Results:\n{output[:2000] if 'output' in dir() else 'done'}\n\nContinue exploitation or give final summary."})
+
     console.print(f"\n[green]Attack complete.[/green] [dim]{ws.path}[/dim]")
 
 
