@@ -45,9 +45,9 @@ gobuster dir -u https://example.com -w /usr/share/wordlists/dirb/common.txt
 ```
 
 RULES:
-- Run 3-5 different tests per round using the RIGHT tools.
-- Don't just use curl - use specialized tools when applicable.
-- If given existing findings, verify each one.
+- Run 3-5 different tests per round using the RIGHT tools. Don't just use curl.
+- If given existing scan findings or a report: read and summarize. Don't re-scan.
+- If user asks "what are the findings" or "özetle" or "summary": read the report.md or findings.json and summarize the existing data. Don't run tools.
 - Keep digging until you've checked everything relevant.
 - Final response: concise summary.
 - Never say "I'll check" - run the tools.
@@ -107,8 +107,20 @@ class ChatSession:
         if t.startswith("recon "):
             self._cmd_recon(text)
             return
-        if t in ("rapor", "report", "findings", "bulgular"):
-            self._show_report()
+        if any(kw in t for kw in ["rapor", "report", "findings", "bulgular", "özetle", "summary", "kritik"]):
+            if self.last_scan_dir:
+                # Just read and display the report
+                report_file = self.last_scan_dir / "report.md"
+                if report_file.exists():
+                    text = report_file.read_text()
+                    # Show summary section
+                    for line in text.split("\n"):
+                        if any(x in line for x in ["Critical", "High", "Medium", "Low", "Total", "Summary"]):
+                            console.print(line)
+                    console.print(f"\n[dim]Full report: {report_file}[/dim]")
+                    self.history.append({"role": "assistant", "content": f"Summary from {report_file.name}"})
+                    return
+            self._per_loop(text)
             return
         if t in ("history", "scans", "list"):
             self._list_scans()
