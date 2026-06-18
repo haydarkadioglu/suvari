@@ -10,6 +10,7 @@ from rich.console import Console
 from rich.table import Table
 from rich.prompt import Prompt
 from .llm import LLMClient
+from .bus import FindingsBus
 from .workspace import Workspace
 from .tools.runner import ToolRunner
 from .mode import ScanMode
@@ -44,15 +45,19 @@ Make connections: "X technology + Y port + Z finding = possible attack chain."
 
 Be insightful, not just a tool runner. Think like an experienced pentester.
 Respond in the user's language (match their input language)."""
-
-
 class ChatSession:
+    """Interactive pentesting chat with agent delegation + findings bus."""
+
     def __init__(self):
         cfg = load_config()
         self.llm = LLMClient(provider=cfg.get("provider", "deepseek"), model=cfg.get("model"))
         self.tools = ToolRunner()
         self.history = []
         self.last_scan_dir: Optional[Path] = None
+        self.bus = FindingsBus()
+
+        # Subscribe bus to auto-delegate exploitation on findings
+        self.bus.subscribe("vuln", self._on_chat_vuln)
 
     def run(self):
         console.print("[bold][SUVARI] — AI Pentester Assistant[/bold]")
@@ -274,6 +279,16 @@ class ChatSession:
         ws = Workspace(url)
         SuvariOrchestrator(target_url=url, workspace=ws).run()
         self.last_scan_dir = ws.path
+        # Publish findings to bus for chat awareness
+        findings_file = ws.path / "analysis" / "findings.json"
+        if findings_file.exists():
+            import json
+            try:
+                data = json.loads(findings_file.read_text())
+                for v in data.get("vulnerabilities", []):
+                    self.bus.publish("scan", v)
+            except Exception:
+                pass
 
     def _cmd_recon(self, text: str):
         from .agents.recon import ReconAgent
@@ -281,7 +296,18 @@ class ChatSession:
         if not url.startswith("http"):
             url = "https://" + url
         ws = Workspace("recon")
-        ReconAgent("recon", self.llm, ws, self.tools).run({"target_url": url})
+        agent = ReconAgent("recon", self.llm, ws, self.tools)
+        result = agent.run({"target_url": url})
+        # Publish findings to bus
+        for k, v in result.items():
+            if isinstance(v, str) and "found" in v.lower():
+                self.bus.publish("recon", {"type": k, "detail": v[:100], "severity": "INFO"})
+
+    def _on_chat_vuln(self, agent: str, finding: dict):
+        """React to vuln findings from chat agents."""
+        vtype = finding.get("type", "")
+        sev = finding.get("severity", "")
+        console.print(f"  [dim]Bus: [{sev}] {vtype} from {agent}[/dim]")
 
     def _cmd_attack_from_dir(self, text: str):
         """Actively exploit findings from scan directory using P-E-R."""
