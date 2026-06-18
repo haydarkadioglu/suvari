@@ -99,13 +99,17 @@ class LLMClient:
         system: Optional[str] = None,
         temperature: float = 0.3,
         max_tokens: int = 4096,
+        stream: bool = False,
     ) -> str:
-        """Send a chat prompt to the LLM, return text response."""
+        """Send a chat prompt to the LLM, return text response. Supports streaming."""
         if system:
             messages = [{"role": "system", "content": system}] + messages
 
         if self.config["api_type"] == "anthropic":
             return self._chat_anthropic(messages, temperature, max_tokens)
+
+        if stream:
+            return self._chat_openai_stream(messages, temperature, max_tokens)
         return self._chat_openai(messages, temperature, max_tokens)
 
     def chat_json(
@@ -143,6 +147,45 @@ class LLMClient:
             return {"error": f"Invalid JSON response: {text[:100]}", "raw": text}
 
     # ─── OpenAI-compatible (OpenAI, DeepSeek, OpenRouter, Ollama, Gemini) ───
+
+    def _chat_openai_stream(self, messages: list, temperature: float, max_tokens: int) -> str:
+        """OpenAI-compatible streaming API call. Prints tokens as they arrive."""
+        headers = {"Content-Type": "application/json"}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+        headers.update(self.extra_headers)
+
+        body = {
+            "model": self.model,
+            "messages": messages,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "stream": True,
+        }
+
+        import sys
+        full = ""
+        base = self.config["base_url"]
+        with self.client.stream("POST", f"{base}/chat/completions", json=body, headers=headers, timeout=120) as resp:
+            for line in resp.iter_lines():
+                if not line:
+                    continue
+                if line.startswith("data: "):
+                    chunk = line[6:]
+                    if chunk.strip() == "[DONE]":
+                        break
+                    try:
+                        import json
+                        data = json.loads(chunk)
+                        delta = data.get("choices", [{}])[0].get("delta", {}).get("content", "")
+                        if delta:
+                            full += delta
+                            sys.stdout.write(delta)
+                            sys.stdout.flush()
+                    except json.JSONDecodeError:
+                        continue
+        print()
+        return full
 
     def _chat_openai(self, messages: list, temperature: float, max_tokens: int) -> str:
         """OpenAI-compatible API call."""

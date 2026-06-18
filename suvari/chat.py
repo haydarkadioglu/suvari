@@ -20,26 +20,13 @@ from .mode import ScanMode
 
 console = Console()
 
-SYSTEM_PROMPT = """You are Suvari, an AI-powered pentesting and CTF assistant. You help with security testing, CTF challenges, and vulnerability analysis.
+SYSTEM_PROMPT = """You are Suvari, an AI-powered pentesting assistant. Be concise - respond in 2-3 sentences max unless asked for details.
 
-You have access to:
-- Scanning: full pipeline (recon -> scan -> analyze -> exploit -> report)
-- CTF analysis: binary, stego, crypto, forensics, pcap, reverse engineering
-- Tools: nmap, whatweb, nuclei, nikto, gobuster, ffuf, sqlmap, wpscan, curl, httpx
-          strings, file, binwalk, exiftool, steghide, volatility, strings
-- Modes: auto, guided, interactive
-- Server mode: all ports + services
-- White-box mode: with source code
+For CTF: describe what to do, suggest specific commands.
+For scan results: list findings briefly, no narrative.
+For general questions: direct answer, no fluff.
 
-For CTF challenges:
-- Describe the challenge naturally: "I have a pcap with DNS exfiltration"
-- Suvari will find files, run tools, and analyze results
-- Works for binary, stego, crypto, forensics, web, and reverse challenges
-- If no files found, ask the user for the file path or to put it in the current directory
-
-Keep responses concise and actionable.
-Respond in the same language as the user.
-"""
+Respond in the same language as the user."""
 
 
 class ChatSession:
@@ -144,15 +131,15 @@ class ChatSession:
                 return
             return
 
-        # General chat — let LLM respond
+        # General chat — let LLM respond with streaming
         console.print()
         try:
             response = self.llm.chat(
                 messages=self.history[-6:],
-                temperature=0.7,
-                max_tokens=512,
+                temperature=0.3,
+                max_tokens=1024,
+                stream=True,
             )
-            console.print(response)
             self.history.append({"role": "assistant", "content": response})
         except Exception as e:
             console.print(f"[red]Error: {e}[/red]")
