@@ -13,32 +13,38 @@ class BugBountyAgent(BaseAgent):
 
     def run(self, context: dict) -> dict:
         url = context["target_url"]
-        self.log(f" BugBounty hunt: {url}")
+        from rich.console import Console
+        console = Console()
+        console.print(f"  [dim]BugBounty: {url}[/dim]")
 
         results = {}
         domain = url.split("://")[-1].split("/")[0]
 
         # Phase 1: Subdomain enumeration
-        self.log(f"  Phase 1: Subdomain enumeration")
+        console.print(f"  Phase 1: Subdomain enumeration")
         subdomains = self._enum_subdomains(domain)
         results["subdomains"] = subdomains
+        console.print(f"    [OK] {len(subdomains)} subdomains")
 
         # Phase 2: URL discovery
-        self.log(f"  Phase 2: URL discovery")
+        console.print(f"  Phase 2: URL discovery")
         urls = self._discover_urls(domain)
         results["urls"] = urls
+        console.print(f"    [OK] {len(urls)} URLs")
 
         # Phase 3: Parameter discovery
-        self.log(f"  Phase 3: Parameter discovery")
+        console.print(f"  Phase 3: Parameter discovery")
         params = self._discover_params(url)
         results["params"] = params
+        console.print(f"    [OK] {len(params)} params")
 
         # Phase 4: Technology fingerprinting
-        self.log(f"  Phase 4: Technology stack")
+        console.print(f"  Phase 4: Technology")
         tech = self._fingerprint_tech(url)
         results["technology"] = tech
+        console.print(f"    [OK] {len(tech)} techs")
 
-        self.log(f"  Done: {len(subdomains)} subdomains, {len(urls)} URLs, {len(params)} params")
+        console.print(f"  Done: {len(subdomains)} subdomains, {len(urls)} URLs")
         return results
 
     def _enum_subdomains(self, domain: str) -> list:
