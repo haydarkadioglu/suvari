@@ -108,7 +108,10 @@ class ChatSession:
             if self.last_scan_dir:
                 self._show_report()
                 return
-        if t.startswith("check "):
+        if t.startswith("cors ") or "cors" in t[:20]:
+            self._cmd_cors(text)
+            return
+        if t.startswith("check ") or "kontrol et" in t or "test et" in t or "dene" in t:
             self._cmd_check(text)
             return
 
@@ -282,22 +285,90 @@ class ChatSession:
         self.history.append({"role": "assistant", "content": f"Recon complete for {url}"})
 
     def _cmd_check(self, text: str):
-        """Quick check on a specific endpoint."""
-        parts = text.split()
-        if len(parts) < 2:
-            console.print("[red]Specify endpoint. Example: check /api[/red]")
+        """Flexible endpoint check - handles various security tests."""
+        from urllib.parse import urlparse
+
+        # Extract URL from text
+        import re
+        url_match = re.search(r'(?:https?://)?([a-zA-Z0-9.-]+\.[a-zA-Z]{2,}(?:/[^\s]*)?)', text)
+        base_url = url_match.group(0) if url_match else self._get_last_target()
+        if not base_url:
+            console.print("[yellow]Specify a URL. Example: check /api on site.com[/yellow]")
             return
+        if not base_url.startswith("http"):
+            base_url = f"https://{base_url}"
+        t = text.lower()
 
-        endpoint = parts[1]
-        base = self._get_last_target()
-        url = f"{base}{endpoint}" if base else endpoint
+        # Determine check type from keywords
+        if "cors" in t:
+            # CORS test
+            out = self.tools.run(
+                ["curl", "-sI", "-H", "Origin: https://evil.com", base_url, "--max-time", "5"], timeout=10
+            )
+            if "Access-Control-Allow-Origin" in out:
+                console.print(f"[red]CORS misconfiguration![/red] Origin reflected in response.")
+            else:
+                console.print("No CORS misconfiguration detected.")
+            for line in out.splitlines()[:10]:
+                if "access-control" in line.lower():
+                    console.print(f"  {line}")
 
-        console.print(f"[dim]Checking: {url}[/dim]")
-        out = self.tools.run(["curl", "-sI", url, "--max-time", "10"], timeout=15)
-        lines = out[:500].split("\n")
-        for line in lines[:10]:
-            console.print(f"  {line}")
-        self.history.append({"role": "assistant", "content": f"Check results for {endpoint}"})
+        elif "header" in t or "security" in t or "güvenlik" in t:
+            # Header check
+            out = self.tools.run(["curl", "-sI", "-L", base_url, "--max-time", "5"], timeout=10)
+            checks = {"X-Frame-Options": "Clickjacking", "X-Content-Type-Options": "MIME sniff",
+                       "Content-Security-Policy": "CSP", "Strict-Transport-Security": "HSTS"}
+            for hdr, name in checks.items():
+                if hdr not in out:
+                    console.print(f"  Missing: {hdr} ({name})")
+            for line in out.splitlines()[:15]:
+                console.print(f"  {line}")
+
+        elif "sql" in t or "sqli" in t:
+            # Quick SQLi test
+            test_url = f"{base_url}?id=1'"
+            out = self.tools.run(["curl", "-s", test_url, "--max-time", "5"], timeout=10)
+            if "sql" in out.lower() or "you have an error" in out.lower():
+                console.print("[red]Possible SQL injection detected![/red]")
+                console.print(f"  Try: sqlmap -u '{base_url}?id=1' --batch")
+            else:
+                console.print("No obvious SQL error detected.")
+
+        elif "xss" in t:
+            # Quick XSS test
+            test_url = f"{base_url}?q=<script>alert(1)</script>"
+            out = self.tools.run(["curl", "-s", test_url, "--max-time", "5"], timeout=10)
+            if "<script>alert(1)</script>" in out:
+                console.print("[red]Reflected XSS detected![/red]")
+            else:
+                console.print("No obvious XSS detected.")
+
+        else:
+            # Generic: just show response
+            out = self.tools.run(["curl", "-sI", base_url, "--max-time", "5"], timeout=10)
+            lines = out[:500].split("\n")
+            for line in lines[:10]:
+                console.print(f"  {line}")
+
+    def _cmd_cors(self, text: str):
+        """CORS misconfiguration test."""
+        import re
+        url_match = re.search(r'(?:https?://)?([a-zA-Z0-9.-]+\.[a-zA-Z]{2,}(?:/[^\s]*)?)', text)
+        target = url_match.group(0) if url_match else self._get_last_target()
+        if not target:
+            console.print("[yellow]Specify URL[/yellow]")
+            return
+        if not target.startswith("http"):
+            target = f"https://{target}"
+
+        console.print(f"Testing CORS on {target}...")
+        for origin in ["https://evil.com", "null", "https://example.com"]:
+            out = self.tools.run(
+                ["curl", "-sI", "-H", f"Origin: {origin}", target, "--max-time", "5"], timeout=10
+            )
+            reflected = "Access-Control-Allow-Origin" in out
+            status = "[red]VULNERABLE[/red]" if reflected else "[green]OK[/green]"
+            console.print(f"  Origin: {origin[:25]:25s} {status}")
 
     def _get_last_target(self) -> str:
         """Get the last scanned URL from history."""
