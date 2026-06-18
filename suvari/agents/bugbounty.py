@@ -137,7 +137,9 @@ class BugBountyAgent(BaseAgent):
                 if result:
                     found.add(result)
 
-        # Verify results with HTTP check (parallel, filter out DNS wildcards)
+        # Verify with HTTP check (parallel) - mark, don't filter
+        verified = set()
+        unverified = set()
         if found:
             from concurrent.futures import ThreadPoolExecutor, as_completed
             import subprocess as sp
@@ -152,22 +154,21 @@ class BugBountyAgent(BaseAgent):
                         )
                         code = result.stdout.strip()
                         if code not in ("000", "", "(error)", "(empty)"):
-                            return sub
+                            return (sub, True, code)
                     except Exception:
                         continue
-                return None
+                return (sub, False, "")
 
-            verified = set()
             with ThreadPoolExecutor(max_workers=15) as pool:
-                futs = {pool.submit(check_sub, s): s for s in sorted(found)[:30]}
+                futs = {pool.submit(check_sub, s): s for s in sorted(found)[:40]}
                 for fut in as_completed(futs):
-                    result = fut.result(timeout=6)
-                    if result:
-                        verified.add(result)
+                    sub, ok, code = fut.result(timeout=6)
+                    if ok:
+                        verified.add(sub)
+                    else:
+                        unverified.add(sub)
 
-            found = verified if verified else set()
-
-        return sorted(found)
+        return sorted(verified) + [f"{s} (DNS only)" for s in sorted(unverified)[:10]]
 
     def _discover_urls(self, domain: str) -> list:
         """Discover URLs from various sources."""
