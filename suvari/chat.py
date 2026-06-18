@@ -137,6 +137,13 @@ class ChatSession:
             self._cmd_bugbounty(text)
             return
 
+        # Exploit/attack keywords
+        if any(kw in t for kw in ["exploit", "attack", "verify", "try to hack", "poc"]):
+            if self.last_scan_dir:
+                self._cmd_attack(text)
+                return
+            return
+
         # General chat — let LLM respond
         console.print()
         try:
@@ -332,7 +339,6 @@ Respond in the same language as the user. Be concise and actionable.
         import re
         from .agents.bugbounty import BugBountyAgent
         from .workspace import Workspace
-        from .config import load_config
 
         domain_match = re.search(r'(?:https?://)?([a-zA-Z0-9.-]+\.[a-zA-Z]{2,})', text)
         if not domain_match:
@@ -356,6 +362,43 @@ Respond in the same language as the user. Be concise and actionable.
             console.print("  No subdomains found")
         console.print(f"  URLs discovered: {len(urls)}")
         self.history.append({"role": "assistant", "content": f"Subdomain enumeration: {len(subs)} found for {domain}"})
+
+    def _cmd_attack(self, text: str):
+        """Run attack on last scan results from chat."""
+        from .orchestrator import SuvariOrchestrator
+        from .workspace import Workspace
+        from .tools.runner import ToolRunner
+        from .llm import LLMClient
+        from .agents.exploiter import ExploiterAgent
+
+        scan_dir = self.last_scan_dir
+        findings_file = scan_dir / "analysis" / "findings.json"
+        if not findings_file.exists():
+            console.print("[yellow]No findings.json in that scan[/yellow]")
+            return
+
+        import json
+        findings = json.loads(findings_file.read_text())
+        vulns = findings.get("vulnerabilities", [])
+        if not vulns:
+            console.print("[yellow]No vulnerabilities found in scan[/yellow]")
+            return
+
+        console.print(f"  Exploiting {len(vulns)} findings...")
+        cfg = load_config()
+        llm = LLMClient(provider=cfg.get("provider", "deepseek"), model=cfg.get("model"))
+        ws = Workspace(f"attack-{scan_dir.name}")
+        tr = ToolRunner()
+        agent = ExploiterAgent("exploiter", llm, ws, tr)
+        context = {
+            "target_url": vulns[0].get("location", ""),
+            "analysis": findings,
+            "fast": False,
+        }
+        results = agent.run(context)
+        successes = sum(1 for r in results.get("exploits", []) if r.get("success"))
+        console.print(f"[green]Done: {successes} confirmed[/green] [dim]{ws.path}[/dim]")
+        self.history.append({"role": "assistant", "content": f"Exploitation complete: {successes} confirmed"})
 
     def _show_report(self):
         """Show last scan report."""
