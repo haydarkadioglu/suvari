@@ -93,12 +93,13 @@ class ChatSession:
         console.print('  "find subdomains for example.com"')
 
     def _handle_input(self, text: str):
-        t = text.strip().lower()
-
-        # Detect scan directory path first
-        path_match = re.search(r'(/home/[^\s]*output/[^\s]+)', text)
+        # Detect scan directory path first (handle quotes)
+        clean_text = text.strip().strip("'\"")
+        path_match = re.search(r'(/home/[^\s]*output/[^\s]+)', clean_text)
         if path_match:
             self.last_scan_dir = Path(path_match.group(1))
+
+        t = clean_text.lower()
 
         if t.startswith("scan "):
             self._cmd_scan(text)
