@@ -120,13 +120,21 @@ class ChatSession:
             self._cmd_check(text)
             return
 
-        # CTF detection: check for CTF-related keywords
+        # CTF detection
         ctf_keywords = ["ctf", "pcap", "binary", "stego", "forensic", "crypto", "rev", "reverse",
                         "flag", "challenge", "buffer overflow", "rop", "shellcode", "exploit",
                         "encrypted", "encoded", "obfuscated", "dump", "memory dump",
                         "rootme", "hackthebox", "tryhackme", "htb"]
         if any(kw in t for kw in ctf_keywords):
             self._handle_ctf(text)
+            return
+
+        # Subdomain enumeration detection
+        subdomain_keywords = ["subdomain", "alt domain", "alt alan", "dns", "alt-domain",
+                               "find subdomain", "enum subdomain", "subdomain discover",
+                               "subdomain enum"]
+        if any(kw in t for kw in subdomain_keywords):
+            self._cmd_bugbounty(text)
             return
 
         # General chat — let LLM respond
@@ -318,6 +326,36 @@ Respond in the same language as the user. Be concise and actionable.
                     if word.startswith("http"):
                         return word.rstrip(".")
         return ""
+
+    def _cmd_bugbounty(self, text: str):
+        """Run subdomain enumeration from chat."""
+        import re
+        from .agents.bugbounty import BugBountyAgent
+        from .workspace import Workspace
+        from .config import load_config
+
+        domain_match = re.search(r'(?:https?://)?([a-zA-Z0-9.-]+\.[a-zA-Z]{2,})', text)
+        if not domain_match:
+            console.print("[yellow]Which domain?[/yellow]")
+            return
+        domain = domain_match.group(1).split("/")[0]
+        cfg = load_config()
+        llm = LLMClient(provider=cfg.get("provider", "deepseek"), model=cfg.get("model"))
+        ws = Workspace(f"bb-{domain}")
+        tr = ToolRunner()
+        agent = BugBountyAgent("bugbounty", llm, ws, tr)
+        console.print(f"  Enumerating {domain}...")
+        results = agent.run({"target_url": f"https://{domain}"})
+        subs = results.get("subdomains", [])
+        urls = results.get("urls", [])
+        if subs:
+            console.print(f"\n  Subdomains ({len(subs)}):")
+            for s in subs[:20]:
+                console.print(f"    {s}")
+        else:
+            console.print("  No subdomains found")
+        console.print(f"  URLs discovered: {len(urls)}")
+        self.history.append({"role": "assistant", "content": f"Subdomain enumeration: {len(subs)} found for {domain}"})
 
     def _show_report(self):
         """Show last scan report."""
