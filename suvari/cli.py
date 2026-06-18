@@ -234,7 +234,11 @@ def attack(
     avail = ", ".join(sorted(tr.available_tools().keys()))
 
     target = vulns[0].get("location", "").split("/")[0] if vulns else "https://example.com"
-    history = [{"role": "user", "content": f"Existing findings: {json.dumps(findings, indent=2)[:2000]}\n\nExploit each finding using appropriate tools. Available: {avail}. Run actual exploitation commands and verify results."}]
+    tool_guide = """Web: nuclei, nikto, wpscan, httpx | Dir: gobuster, ffuf, feroxbuster, dirb
+Net: nmap, masscan, netexec, responder | DNS: dnsenum, dnsrecon, fierce
+Auth: hydra, sqlmap | SMB: enum4linux, smbmap, rpcclient
+Info: whatweb, wafw00f, curl | Crack: john, hashcat | OSINT: amass, theharvester"""
+    history = [{"role": "user", "content": f"Existing findings: {json.dumps(findings, indent=2)[:2000]}\n\nExploit each finding. Available tools:\n{tool_guide}\n\nUse the RIGHT tool. Don't just use curl. Use ```tool blocks."}]
 
     from rich.progress import Progress, SpinnerColumn, TextColumn
     console.print()
