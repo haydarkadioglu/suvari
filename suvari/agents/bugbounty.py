@@ -82,7 +82,21 @@ class BugBountyAgent(BaseAgent):
                 if line and not line.startswith("("):
                     found.add(line.lower())
 
-        # Method 2: dnsenum (tight timeout)
+        # Method 2: crt.sh Certificate Transparency logs (no tool needed)
+        try:
+            import urllib.request, json
+            url = f"https://crt.sh/?q=%25.{domain}&output=json"
+            req = urllib.request.Request(url, headers={"User-Agent": "Suvari/1.0"})
+            resp = urllib.request.urlopen(req, timeout=15)
+            data = json.loads(resp.read())
+            for entry in data[:100]:
+                name = entry.get("name_value", "").strip()
+                if name and name.endswith(domain):
+                    found.add(name.lower())
+        except Exception:
+            pass
+
+        # Method 3: dnsenum (tight timeout)
         if self.tools.check_tool("dnsenum"):
             out = self.tools.run(["dnsenum", "--enum", domain, "--noreverse", "--timeout", "5"], timeout=20)
             for line in out.splitlines()[:50]:
@@ -116,6 +130,16 @@ class BugBountyAgent(BaseAgent):
                 result = fut.result(timeout=4)
                 if result:
                     found.add(result)
+
+        # Verify results with HTTP check (filter out DNS wildcards)
+        if self.tools.check_tool("httpx") and found:
+            for sub in sorted(found)[:20]:
+                for proto in ("https", "http"):
+                    out = self.tools.run(["curl", "-sI", "-o", "/dev/null", "-w", "%{http_code}",
+                                          f"{proto}://{sub}", "--max-time", "4"], timeout=6)
+                    code = out.strip()
+                    if code not in ("000", "", "(error)", "(empty)"):
+                        break
 
         return sorted(found)
 
