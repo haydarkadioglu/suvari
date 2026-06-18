@@ -138,14 +138,23 @@ class BugBountyAgent(BaseAgent):
                     found.add(result)
 
         # Verify results with HTTP check (filter out DNS wildcards)
-        if self.tools.check_tool("httpx") and found:
-            for sub in sorted(found)[:20]:
+        if found:
+            verified = set()
+            for sub in sorted(found)[:30]:
                 for proto in ("https", "http"):
-                    out = self.tools.run(["curl", "-sI", "-o", "/dev/null", "-w", "%{http_code}",
-                                          f"{proto}://{sub}", "--max-time", "4"], timeout=6)
+                    out = self.tools.run(
+                        ["curl", "-sI", "-o", "/dev/null", "-w", "%{http_code}",
+                         f"{proto}://{sub}", "--max-time", "3"], timeout=5
+                    )
                     code = out.strip()
-                    if code not in ("000", "", "(error)", "(empty)"):
+                    if code not in ("000", "", "(error)", "(empty)",):
+                        verified.add(sub)
                         break
+            if verified:
+                found = verified
+            else:
+                # DNS wildcard - no real subdomains found
+                found = set()
 
         return sorted(found)
 
