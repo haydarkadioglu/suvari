@@ -48,21 +48,42 @@ class BugBountyAgent(BaseAgent):
         return results
 
     def _enum_subdomains(self, domain: str) -> list:
-        """Enumerate subdomains using available tools."""
+        """Enumerate subdomains using available tools + DNS fallback."""
         found = set()
 
+        # Method 1: subfinder
         if self.tools.check_tool("subfinder"):
             out = self.tools.run(["subfinder", "-silent", "-d", domain], timeout=60)
             for line in out.splitlines():
                 line = line.strip()
                 if line and not line.startswith("("):
-                    found.add(line)
+                    found.add(line.lower())
 
+        # Method 2: dnsenum
         if self.tools.check_tool("dnsenum"):
             out = self.tools.run(["dnsenum", "--enum", domain, "--noreverse"], timeout=60)
             for line in out.splitlines():
-                if ":" in line and not line.startswith("("):
-                    found.add(line.split(":")[-1].strip())
+                line = line.strip()
+                if line and not line.startswith("(") and domain in line:
+                    found.add(line.lower().split()[-1])
+
+        # Method 3: DNS resolution of common subdomains (always works)
+        common = ["www", "mail", "ftp", "admin", "api", "blog", "dev", "test",
+                   "webmail", "remote", "vpn", "shop", "app", "beta", "m",
+                   "mail2", "pop3", "imap", "smtp", "ns1", "ns2", "mx", "cpanel",
+                   "dns", "server", "support", "help", "forum", "wiki", "cdn",
+                   "cloud", "portal", "secure", "login", "register", "docs",
+                   "monitor", "status", "git", "jenkins", "jira", "confluence"]
+
+        import subprocess, socket
+        for sub in common:
+            try:
+                host = f"{sub}.{domain}"
+                ip = socket.gethostbyname(host)
+                if ip:
+                    found.add(host)
+            except socket.gaierror:
+                continue
 
         return sorted(found)
 
