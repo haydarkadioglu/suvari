@@ -43,6 +43,13 @@ APPROACH:
 4. EXECUTE when asked
 
 Write code in ```python, ```bash, or ```tool blocks. All scripts are saved and can be executed.
+For file-only saves (no display), use ```save blocks:
+```save
+filename: exploit.py
+#!/usr/bin/env python3
+...
+```
+The file will be saved silently to output/chat/exploits/.
 Be insightful. Think like an experienced pentester.
 Respond in the user's language (match their input language)."""
 
@@ -276,6 +283,23 @@ class ChatSession:
         saved = set()  # Track saved code to avoid duplicates
         save_dir_py = Path("output") / "chat" / "exploits"
         save_dir_sh = Path("output") / "chat" / "scripts"
+
+        # Handle ```save blocks (silent save, no display)
+        for m in re.finditer(r'```save\n(.*?)```', text, re.DOTALL):
+            content = m.group(1).strip()
+            if content and "filename:" in content:
+                lines = content.split("\n")
+                fname_line = lines[0]
+                code = "\n".join(lines[1:]).strip()
+                fname = fname_line.replace("filename:", "").strip()
+                if code and fname:
+                    try:
+                        save_dir_py.mkdir(parents=True, exist_ok=True)
+                        (save_dir_py / fname).write_text(code)
+                        console.print(f"  Saved: {save_dir_py / fname}")
+                        saved.add(code)
+                    except Exception as e:
+                        console.print(f"  Save error: {e}")
 
         # Save ALL ```python blocks as .py (lazy regex)
         for m in re.finditer(r'```python\n(.*?)```', text, re.DOTALL):
