@@ -164,15 +164,28 @@ class ChatSession:
             self._list_scans()
             return
         # P-E-R with existing scan context
-        self._per_loop(text, scan_context=scan_context)
+        self._per_loop(text)
 
-    def _per_loop(self, user_input: str, max_rounds: int = 20, scan_context: str = ""):
+    def _per_loop(self, user_input: str, max_rounds: int = 20):
         """P-E-R loop. Loads scan findings if path provided. Saves results to scan dir."""
         self.history.append({"role": "user", "content": user_input})
         avail = ", ".join(sorted(self.tools.available_tools().keys()))
         context = f"Available tools: {avail}"
         if hasattr(self, '_scan_context') and self._scan_context:
             context += f"\n\n{self._scan_context}"
+
+        # Summarize old history to keep context manageable
+        if len(self.history) > 20:
+            old = self.history[:-10]
+            recent = self.history[-10:]
+            summary_prompt = f"Summarize this conversation so far in 2-3 sentences:\n" + "\n".join(
+                f"{m['role']}: {m['content'][:100]}" for m in old
+            )
+            try:
+                summary = self.llm.chat(messages=[{"role": "user", "content": summary_prompt}], temperature=0.1, max_tokens=200)
+                self.history = [{"role": "system", "content": f"[Previous conversation summary: {summary}]"}] + recent
+            except Exception:
+                self.history = self.history[-15:]
 
         # Detect scan directory in input
         path_match = re.search(r'(/home/[^\s]+output/[^\s]+)', user_input)
