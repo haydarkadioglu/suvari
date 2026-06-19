@@ -172,8 +172,9 @@ class ChatSession:
         if t in ("history", "scans", "list"):
             self._list_scans()
             return
-        # Save last generated code to file
-        if any(kw in t for kw in ["kaydet", "save", "dosyaya yaz", "farkl", "write to file"]):
+        # Save last generated code to file (only standalone commands)
+        save_only = [t.strip() for t in ["kaydet", "save", "dosyaya yaz", "farkl", "write to file"]]
+        if t in save_only or (len(t.split()) <= 2 and any(t.startswith(kw) or t == kw for kw in save_only)):
             self._save_last_code(text)
             return
         # P-E-R with existing scan context
