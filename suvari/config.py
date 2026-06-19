@@ -14,12 +14,6 @@ CONFIG_FILE = CONFIG_DIR / "config.json"
 ENV_FILE = CONFIG_DIR / ".env"
 
 PROVIDERS = {
-    "openai": {
-        "name": "OpenAI",
-        "models": ["gpt-4o", "gpt-4o-mini", "o3-mini"],
-        "env_key": "OPENAI_API_KEY",
-        "default_model": "gpt-4o",
-    },
     "anthropic": {
         "name": "Anthropic (Claude)",
         "models": ["claude-sonnet-4-20250514", "claude-sonnet-4", "claude-3-5-sonnet-latest"],
@@ -41,12 +35,11 @@ PROVIDERS = {
     "openrouter": {
         "name": "OpenRouter",
         "models": [
-            "openai/gpt-4o", "anthropic/claude-sonnet-4",
-            "deepseek/deepseek-chat", "google/gemini-2.5-flash",
-            "qwen/qwen-2.5-72b",
+            "anthropic/claude-sonnet-4", "deepseek/deepseek-chat",
+            "google/gemini-2.5-flash", "qwen/qwen-2.5-72b",
         ],
         "env_key": "OPENROUTER_API_KEY",
-        "default_model": "openai/gpt-4o",
+        "default_model": "deepseek/deepseek-chat",
     },
     "ollama": {
         "name": "Ollama (local)",
@@ -134,8 +127,8 @@ def configure_interactive():
 
     while True:
         choice = Prompt.ask(
-            "[bold]Pick a provider[/bold] (1-6)",
-            choices=["1", "2", "3", "4", "5", "6"],
+            "[bold]Pick a provider[/bold] (1-5)",
+            choices=["1", "2", "3", "4", "5"],
         )
         provider_key = provider_keys[int(choice) - 1]
         provider_info = PROVIDERS[provider_key]
