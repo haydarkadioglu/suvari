@@ -1,145 +1,173 @@
 """
-P-E-R Core — Planner-Executor-Reflector framework.
-Inspired by LuaN1aoAgent's P-E-R agent collaboration architecture.
-
-Planner: decides strategy and next actions based on accumulated knowledge
-Executor: runs tools and collects results
-Reflector: analyzes results, classifies outcomes, provides feedback
+Suvari Core — programmatic API for all Suvari operations.
+Chat, agents, tools, findings bus, file management all in one place.
 """
 
-from typing import Optional, Callable
+from typing import Optional
+from pathlib import Path
+from datetime import datetime
 from .llm import LLMClient
+from .bus import FindingsBus
 from .workspace import Workspace
 from .tools.runner import ToolRunner
-from .prompt_loader import PromptLoader
-from .state import PipelineState
+from .config import load_config
+import re, json, shlex, subprocess as sp
 
 
-PLANNER_PROMPT = """You are a penetration testing strategist (Planner). Based on the current state of the scan, decide what to do next.
+class SuvariCore:
+    """Core API: scan, chat, attack, recon, list_scans, get_report."""
 
-Target: {target_url}
-Phase: {phase}
-Mode: {mode}
+    def __init__(self):
+        cfg = load_config()
+        self.llm = LLMClient(provider=cfg.get("provider", "deepseek"), model=cfg.get("model"))
+        self.tools = ToolRunner()
+        self.bus = FindingsBus()
+        self.history = []
+        self.last_scan_dir: Optional[Path] = None
 
-Completed phases: {completed}
-Current knowledge: {knowledge}
+    # ─── Scan ───
 
-## Available Tools
-{tools}
+    def scan(self, url: str, fast: bool = False) -> dict:
+        """Run full scan pipeline."""
+        from .orchestrator import SuvariOrchestrator
+        ws = Workspace(url)
+        orch = SuvariOrchestrator(target_url=url, workspace=ws, fast=fast)
+        orch.run()
+        self.last_scan_dir = ws.path
+        return self._load_results(ws.path)
 
-## Instructions
-Analyze the current state and decide the best next action.
-Consider:
-1. What do we know already?
-2. What critical information is missing?
-3. What's the highest-impact next step?
-4. Are there dependencies (must check X before Y)?
+    def recon(self, url: str) -> dict:
+        """Run reconnaissance only."""
+        from .agents.recon import ReconAgent
+        ws = Workspace("recon")
+        agent = ReconAgent("recon", self.llm, ws, self.tools)
+        return agent.run({"target_url": url})
 
-Return a JSON plan:
-{{
-  "assessment": "Current situation summary",
-  "next_action": "tool_name or phase_name",
-  "priority": "high/medium/low",
-  "reasoning": "Why this action",
-  "estimated_impact": "What we expect to learn"
-}}
-"""
+    # ─── Chat ───
 
-REFLECTOR_PROMPT = """You are a penetration testing analyst (Reflector). Analyze the results of the last action.
+    def chat(self, user_input: str, session_file: Optional[Path] = None, max_rounds: int = 20) -> str:
+        """P-E-R chat. Returns AI response (code stripped, tools executed)."""
+        from .agents.exploiter import ExploiterAgent
+        SYSTEM_PROMPT = self._get_system_prompt()
 
-Target: {target_url}
-Last action: {last_action}
-Tool used: {tool}
-Output preview: {output}
+        self.history.append({"role": "user", "content": user_input})
+        context = f"Available tools: {', '.join(sorted(self.tools.available_tools().keys()))}"
+        response = ""
+        display_text = ""
 
-## Instructions
-Analyze the output and determine:
-1. Was the action successful?
-2. What did we learn?
-3. Any errors or anomalies?
-4. What should the Planner do next?
+        for turn in range(max_rounds):
+            msgs = [{"role": "system", "content": SYSTEM_PROMPT + "\n\n" + context}]
+            msgs += self.history[-10:]
+            response = self.llm.chat(messages=msgs, temperature=0.3, max_tokens=1024)
 
-Return JSON:
-{{
-  "success": true/false,
-  "findings": ["List of findings from this action"],
-  "error_type": null or "tool_error/timeout/permission/empty/other",
-  "error_detail": "Description of any errors",
-  "next_suggestion": "What to try next",
-  "confidence": "high/medium/low"
-}}
-"""
+            # Extract and save code blocks
+            saved = set()
+            for lang, ext in [("python", "py"), ("bash", "sh"), ("bat", "bat"), ("cmd", "bat"), ("powershell", "ps1")]:
+                for m in re.finditer(r'```' + lang + r'\n(.*?)```', response, re.DOTALL):
+                    code = m.group(1).strip()
+                    if len(code) > 10 and code not in saved:
+                        d = Path("output") / "chat" / "exploits" if lang == "python" else Path("output") / "chat" / "scripts"
+                        d.mkdir(parents=True, exist_ok=True)
+                        fname = f"script_{datetime.now().strftime('%H%M%S')}.{ext}"
+                        (d / fname).write_text(code)
+                        saved.add(code)
 
+            # Strip code from display
+            parts = response.split("```")
+            display_text = ""
+            for i, part in enumerate(parts):
+                if i % 2 == 0:
+                    display_text += part
+                elif any(part.startswith(x) for x in ("python", "bash", "sh", "bat", "cmd", "powershell")):
+                    continue
+                else:
+                    display_text += part
+            display_text = display_text.strip()
 
-class Planner:
-    """Decides strategy and next actions."""
+            # Extract tool commands and execute
+            cmds = []
+            for m in re.finditer(r'```tool\n(.*?)```', response, re.DOTALL):
+                c = m.group(1).strip()
+                if c:
+                    cmds.append(c)
+            if not cmds:
+                for m in re.finditer(r'```(?:bash|sh)?\n(.*?)```', response, re.DOTALL):
+                    c = m.group(1).strip()
+                    fw = c.split()[0] if c else ""
+                    if fw in self.tools.available_tools() or fw in ("python3", "python", "cat", "ls"):
+                        cmds.append(c)
 
-    def __init__(self, llm: LLMClient, tools: ToolRunner, prompt_loader: PromptLoader):
-        self.llm = llm
-        self.tools = tools
-        self.prompts = prompt_loader
-        self.knowledge = []
+            if not cmds:
+                break
 
-    def decide(self, phase: str, completed: list, last_results: dict = None) -> dict:
-        """Decide the next action based on current state."""
-        knowledge_text = "\n".join(self.knowledge[-5:]) if self.knowledge else "No knowledge yet"
+            for cmd in cmds[:3]:
+                try:
+                    if "|" in cmd:
+                        r = sp.run(cmd, shell=True, capture_output=True, text=True, timeout=60)
+                        output = (r.stdout + r.stderr)[:2000]
+                    else:
+                        output = self.tools.run(shlex.split(cmd), timeout=60)[:2000]
+                except Exception as e:
+                    output = f"(error: {e})"
 
-        prompt = PLANNER_PROMPT.format(
-            target_url=self.prompts.globals["target_url"],
-            phase=phase,
-            mode="Fast" if self.prompts.globals.get("fast") else "Full",
-            completed=", ".join(completed) or "none",
-            knowledge=knowledge_text[:1000],
-            tools=", ".join(self.tools.available_tools().keys()) or "none",
-        )
+            # Feed results back to AI
+            self.history.append({"role": "assistant", "content": response})
+            self.history.append({"role": "user", "content": f"Results above. Summarize or continue."})
 
-        try:
-            plan = self.llm.chat_json(
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.2,
-            )
-            return plan
-        except Exception as e:
-            return {
-                "assessment": "Fallback to default",
-                "next_action": phase,
-                "priority": "medium",
-                "reasoning": f"AI error: {e}",
-                "estimated_impact": "Unknown",
-            }
+        # Log to session file
+        if session_file:
+            try:
+                entry = display_text if display_text else (response[:200] if response else user_input)
+                with open(session_file, 'a') as f:
+                    f.write(f"\n## {datetime.now().strftime('%H:%M:%S')}\n**User:** {user_input}\n\n**Suvari:** {entry[:500]}\n\n")
+            except Exception:
+                pass
 
-    def add_knowledge(self, finding: str):
-        """Add a finding to accumulated knowledge."""
-        self.knowledge.append(finding)
+        return display_text or response[:500] or "Done."
 
+    # ─── Attack ───
 
-class Reflector:
-    """Analyzes results and provides feedback."""
+    def attack(self, scan_dir: Optional[Path] = None) -> dict:
+        """Exploit findings from a previous scan."""
+        scan_dir = scan_dir or self.last_scan_dir
+        if not scan_dir:
+            return {"error": "No scan directory"}
+        findings_file = scan_dir / "analysis" / "findings.json"
+        if not findings_file.exists():
+            return {"error": f"No findings in {scan_dir}"}
+        findings = json.loads(findings_file.read_text())
+        from .agents.exploiter import ExploiterAgent
+        ws = Workspace(f"attack-{scan_dir.name}")
+        agent = ExploiterAgent("exploit", self.llm, ws, self.tools)
+        return agent.run({"target_url": str(findings.get("vulnerabilities", [{}])[0].get("location", "")).split("/")[0],
+                          "analysis": findings})
 
-    def __init__(self, llm: LLMClient):
-        self.llm = llm
+    # ─── Helpers ───
 
-    def analyze(self, last_action: str, tool: str, output: str, target_url: str) -> dict:
-        """Analyze the output of a tool execution."""
-        prompt = REFLECTOR_PROMPT.format(
-            target_url=target_url,
-            last_action=last_action,
-            tool=tool,
-            output=output[:1500],
-        )
+    def list_scans(self) -> list:
+        d = Path("output")
+        if not d.exists():
+            return []
+        return sorted([p.name for p in d.iterdir()], reverse=True)[:10]
 
-        try:
-            analysis = self.llm.chat_json(
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.1,
-            )
-            return analysis
-        except Exception as e:
-            return {
-                "success": bool(output and not output.startswith("(")),
-                "findings": [f"Ran {tool} on {last_action}"],
-                "error_type": "parse_error" if output else "empty",
-                "error_detail": str(e),
-                "next_suggestion": "continue with next phase",
-                "confidence": "low",
-            }
+    def get_report(self, scan_dir: Path) -> str:
+        r = scan_dir / "report.md"
+        return r.read_text()[:3000] if r.exists() else ""
+
+    def _get_system_prompt(self) -> str:
+        return """You are Suvari, an AI-powered pentesting assistant for AUTHORIZED testing only.
+
+YOUR ROLE: Write exploits, payloads, and testing scripts. Assume authorized testing.
+
+Write code in ```python or ```bash blocks. Code is auto-saved and executed.
+Respond in the user's language."""
+
+    def _load_results(self, path: Path) -> dict:
+        results = {"path": str(path)}
+        f = path / "analysis" / "findings.json"
+        if f.exists():
+            results["findings"] = json.loads(f.read_text())
+        r = path / "report.md"
+        if r.exists():
+            results["report"] = r.read_text()[:2000]
+        return results
