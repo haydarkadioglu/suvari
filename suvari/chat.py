@@ -233,8 +233,11 @@ class ChatSession:
 
             commands = self._extract_tool_commands(response)
 
+            # Strip save blocks from display (they're saved silently)
+            display_text = re.sub(r'```save\n.*?```', '[saved silently]', response, flags=re.DOTALL)
+
             if not commands:
-                console.print(response)
+                console.print(display_text)
                 self.history.append({"role": "assistant", "content": response})
                 report_lines.append(f"## Result\n{response}\n")
                 break
