@@ -233,7 +233,16 @@ class ChatSession:
             commands = self._extract_tool_commands(response)
 
             # Strip code blocks from display (saved to files anyway)
-            display_text = re.sub(r'```(?:python|bash|sh|bat|cmd|powershell|save)\n.*?```', '', response, flags=re.DOTALL)
+            # Split on ``` and keep only text parts (remove code blocks)
+            parts = response.split("```")
+            display_text = ""
+            for i, part in enumerate(parts):
+                if i % 2 == 0:
+                    display_text += part
+                elif part.startswith(("python", "bash", "sh", "bat", "cmd", "powershell", "save")):
+                    continue  # Skip code blocks
+                else:
+                    display_text += part  # Keep non-code backtick content
             display_text = display_text.strip()
 
             if not commands and not display_text:
