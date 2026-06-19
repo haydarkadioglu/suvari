@@ -171,3 +171,24 @@ Respond in the user's language."""
         if r.exists():
             results["report"] = r.read_text()[:2000]
         return results
+
+
+# ─── P-E-R components (used by orchestrator) ───
+
+class PromptLoader:
+    """Stub - Prompt loading for orchestrator compatibility."""
+    def __init__(self, target_url: str = "", fast: bool = False):
+        self.target_url = target_url
+        self.fast = fast
+
+class Planner:
+    """Stub - P-E-R planner for orchestrator compatibility."""
+    def __init__(self, llm, tools, prompts):
+        self.llm = llm
+        self.tools = tools
+        self.prompts = prompts
+
+class Reflector:
+    """Stub - P-E-R reflector for orchestrator compatibility."""
+    def __init__(self, llm):
+        self.llm = llm
