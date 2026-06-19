@@ -239,21 +239,27 @@ class ChatSession:
 
             commands = self._extract_tool_commands(response)
 
-            # Strip code blocks from display (they're saved to files anyway)
-            display_text = re.sub(r'```(?:python|bash|sh|bat|cmd|powershell|save)\n.*?```', '[code saved to file]', response, flags=re.DOTALL, count=5)
+            # Strip code blocks from display (saved to files anyway)
+            display_text = re.sub(r'```(?:python|bash|sh|bat|cmd|powershell|save)\n.*?```', '', response, flags=re.DOTALL)
+            display_text = display_text.strip()
 
+            if not commands and not display_text:
+                # Only code, no text - just saved silently
+                self.history.append({"role": "assistant", "content": response})
+                break
             if not commands:
                 console.print(display_text)
                 self.history.append({"role": "assistant", "content": response})
                 report_lines.append(f"## Result\n{response}\n")
                 break
 
-            # Show response (without code blocks) then execute
-            console.print(display_text)
+            # Show text (without code) then execute
+            if display_text:
+                console.print(display_text)
 
             results = []
             for cmd in commands:
-                with console.status(f" Running: {cmd[:50]}...", spinner="dots"):
+                with console.status(f"Running: {cmd[:50]}...", spinner="dots"):
                     try:
                         if "|" in cmd:
                             import subprocess as sp
