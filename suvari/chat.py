@@ -242,6 +242,9 @@ class ChatSession:
                 report_lines.append(f"## Result\n{response}\n")
                 break
 
+            # Show response (without code blocks) then execute
+            console.print(display_text)
+
             results = []
             for cmd in commands:
                 with console.status(f" Running: {cmd[:50]}...", spinner="dots"):
