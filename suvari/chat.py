@@ -66,7 +66,7 @@ class ChatSession:
         console.print("Type 'help' for commands, 'exit' to quit.\n")
         while True:
             try:
-                text = Prompt.ask("You")
+                text = Prompt.ask("[bold cyan]You[/bold cyan]")
             except (EOFError, KeyboardInterrupt):
                 console.print("\nGoodbye!")
                 break
@@ -77,7 +77,9 @@ class ChatSession:
             if t == "help":
                 self._show_help()
                 continue
+            console.print("[dim]─" * 50 + "[/dim]")
             self._handle_input(text)
+            console.print("[dim]─" * 50 + "[/dim]")
 
     def _show_help(self):
         t = Table(show_header=False, border_style="dim")
@@ -271,17 +273,19 @@ class ChatSession:
     def _extract_tool_commands(self, text: str) -> list:
         """Extract commands and save code blocks as files."""
         cmds = []
+        saved = set()  # Track saved code to avoid duplicates
         save_dir_py = Path("output") / "chat" / "exploits"
         save_dir_sh = Path("output") / "chat" / "scripts"
 
-        # Save ALL ```python blocks as .py (lazy regex, works with/without trailing newline)
+        # Save ALL ```python blocks as .py (lazy regex)
         for m in re.finditer(r'```python\n(.*?)```', text, re.DOTALL):
             code = m.group(1).strip()
-            if len(code) > 10:
+            if len(code) > 10 and code not in saved:
                 try:
                     save_dir_py.mkdir(parents=True, exist_ok=True)
                     fname = f"script_{datetime.now().strftime('%H%M%S')}.py"
                     (save_dir_py / fname).write_text(code)
+                    saved.add(code)
                     console.print(f"  Saved: {save_dir_py / fname}")
                     cmds.append(f"python3 {save_dir_py / fname}")
                 except Exception as e:
@@ -303,11 +307,12 @@ class ChatSession:
         # Save ```bash blocks as .sh
         for m in re.finditer(r'```bash\n(.*?)```', text, re.DOTALL):
             code = m.group(1).strip()
-            if len(code) > 10:
+            if len(code) > 10 and code not in saved:
                 try:
                     save_dir_sh.mkdir(parents=True, exist_ok=True)
                     fname = f"script_{datetime.now().strftime('%H%M%S')}.sh"
                     (save_dir_sh / fname).write_text(code)
+                    saved.add(code)
                     console.print(f"  Saved: {save_dir_sh / fname}")
                 except Exception:
                     pass
