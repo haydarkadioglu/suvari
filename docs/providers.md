@@ -6,11 +6,10 @@ Suvari supports multiple LLM providers. Configure via `python suvari.py configur
 
 | Provider | Models | API Key Env Var |
 |----------|--------|-----------------|
-| openai | gpt-4o, gpt-4o-mini, o3-mini | OPENAI_API_KEY |
-| anthropic | claude-sonnet-4, claude-3-5-sonnet | ANTHROPIC_API_KEY |
 | deepseek | deepseek-chat, deepseek-reasoner | DEEPSEEK_API_KEY |
+| anthropic | claude-sonnet-4, claude-3-5-sonnet | ANTHROPIC_API_KEY |
 | gemini | gemini-2.0-flash, gemini-2.0-pro | GEMINI_API_KEY |
-| openrouter | any (anthropic/claude-sonnet-4, etc.) | OPENROUTER_API_KEY |
+| openrouter | any (deepseek/deepseek-chat, etc.) | OPENROUTER_API_KEY |
 | ollama | local models (llama3, mistral, etc.) | (none, uses localhost) |
 
 ## Custom Provider
