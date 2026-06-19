@@ -70,7 +70,13 @@ class ChatSession:
 
     def run(self):
         console.print("[bold][SUVARI] — AI Pentester Assistant[/bold]")
-        console.print("Type 'help' for commands, 'exit' to quit.\n")
+        console.print("[dim]output/chat/session_*.md logs all messages[/dim]")
+        self._session_file = datetime.now().strftime("output/chat/session_%Y%m%d_%H%M%S.md")
+        try:
+            Path("output/chat").mkdir(parents=True, exist_ok=True)
+            Path(self._session_file).write_text(f"# Suvari Chat Session\nStarted: {datetime.now().isoformat()[:19]}\n\n")
+        except Exception:
+            self._session_file = None
         while True:
             try:
                 text = Prompt.ask("[bold cyan]You[/bold cyan]")
@@ -276,14 +282,12 @@ class ChatSession:
                 more_msg = f"Results:\n{result_block}\n\nFinal round. Give comprehensive summary of all findings."
             self.history.append({"role": "user", "content": more_msg})
 
-        # Save to scan dir (preferred) or chat dir
+        # Save to session file (append once per session)
         try:
-            save_dir = scan_dir if scan_dir else Path("output") / "chat"
-            save_dir.mkdir(parents=True, exist_ok=True)
-            f = save_dir / f"chat_{datetime.now().strftime('%H%M%S')}.md"
-            f.write_text("\n".join(report_lines))
-            console.print(f"[dim]Saved: {f}[/dim]")
-            self.last_scan_dir = save_dir
+            if hasattr(self, '_session_file') and self._session_file:
+                with open(self._session_file, 'a') as f:
+                    ts = datetime.now().strftime('%H:%M:%S')
+                    f.write(f"\n## {ts}\n**User:** {user_input}\n\n**Suvari:** {response}\n\n")
         except Exception:
             pass
 
