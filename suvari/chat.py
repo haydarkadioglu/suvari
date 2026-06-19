@@ -233,8 +233,8 @@ class ChatSession:
 
             commands = self._extract_tool_commands(response)
 
-            # Strip save blocks from display (they're saved silently)
-            display_text = re.sub(r'```save\n.*?```', '[saved silently]', response, flags=re.DOTALL)
+            # Strip code blocks from display (they're saved to files anyway)
+            display_text = re.sub(r'```(?:python|bash|sh|bat|cmd|powershell|save)\n.*?```', '[code saved to file]', response, flags=re.DOTALL, count=5)
 
             if not commands:
                 console.print(display_text)
