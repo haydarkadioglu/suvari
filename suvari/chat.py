@@ -108,7 +108,7 @@ class ChatSession:
         # If path provided AND asking for action (exploit, test, dene, sız), run exploitation
         if path_match:
             self.last_scan_dir = Path(path_match.group(1))
-            action_keywords = ["sız", "exploit", "dene", "test et", "kır", "yap", "gir", "atak", "hack", "bypass"]
+            action_keywords = ["exploit", "attack", "hack", "bypass", "crack", "brute"]
             if any(kw in t for kw in action_keywords):
                 self._cmd_attack_from_dir(text)
                 return
@@ -154,7 +154,7 @@ class ChatSession:
         if t.startswith("recon "):
             self._cmd_recon(text)
             return
-        if any(kw in t for kw in ["rapor", "report", "findings", "bulgular", "özetle", "summary", "kritik"]):
+        if any(kw in t for kw in ["report", "findings", "summary"]):
             if self.last_scan_dir:
                 # Just read and display the report
                 report_file = self.last_scan_dir / "report.md"
@@ -172,9 +172,8 @@ class ChatSession:
         if t in ("history", "scans", "list"):
             self._list_scans()
             return
-        # Save last generated code to file (only standalone commands)
-        save_only = [t.strip() for t in ["kaydet", "save", "dosyaya yaz", "farkl", "write to file"]]
-        if t in save_only or (len(t.split()) <= 2 and any(t.startswith(kw) or t == kw for kw in save_only)):
+        # Save last generated code to file (simple keyword)
+        if t in ("save", "kaydet") or t.startswith("save ") or t.startswith("kaydet "):
             self._save_last_code(text)
             return
         # P-E-R with existing scan context
