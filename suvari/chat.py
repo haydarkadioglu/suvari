@@ -172,6 +172,10 @@ class ChatSession:
         if t in ("history", "scans", "list"):
             self._list_scans()
             return
+        # Save last generated code to file
+        if any(kw in t for kw in ["kaydet", "save", "dosyaya yaz", "farkl", "write to file"]):
+            self._save_last_code(text)
+            return
         # P-E-R with existing scan context
         self._per_loop(text)
 
@@ -394,6 +398,40 @@ class ChatSession:
         vtype = finding.get("type", "")
         sev = finding.get("severity", "")
         console.print(f"  [dim]Bus: [{sev}] {vtype} from {agent}[/dim]")
+
+    def _save_last_code(self, text: str):
+        """Save the last AI-generated code to a file."""
+        if not self.history:
+            console.print("[yellow]No previous code to save[/yellow]")
+            return
+        # Find last assistant response
+        for msg in reversed(self.history):
+            if msg["role"] == "assistant":
+                content = msg["content"]
+                # Extract all code blocks
+                for lang, ext in [("python", "py"), ("bash", "sh"), ("bat", "bat"), ("powershell", "ps1"), ("cmd", "bat")]:
+                    for m in __import__('re').finditer(r'```' + lang + r'\n(.*?)```', content, __import__('re').DOTALL):
+                        code = m.group(1).strip()
+                        if len(code) > 10:
+                            # Determine filename from user request
+                            import re as _re
+                            fname_match = _re.search(r'(?:kaydet|save|write)\s+(\S+\.\w+)', text.lower())
+                            fname = fname_match.group(1) if fname_match else f"script_{datetime.now().strftime('%H%M%S')}.{ext}"
+                            save_dir = Path("output") / "chat" / "scripts"
+                            save_dir.mkdir(parents=True, exist_ok=True)
+                            (save_dir / fname).write_text(code)
+                            console.print(f"  Saved: {save_dir / fname}")
+                            return
+                # If no code blocks found, try to save the entire response
+                if len(content) > 50:
+                    fname_match = __import__('re').search(r'(?:kaydet|save|write)\s+(\S+\.\w+)', text.lower())
+                    fname = fname_match.group(1) if fname_match else f"output_{datetime.now().strftime('%H%M%S')}.txt"
+                    save_dir = Path("output") / "chat" / "scripts"
+                    save_dir.mkdir(parents=True, exist_ok=True)
+                    (save_dir / fname).write_text(content)
+                    console.print(f"  Saved: {save_dir / fname}")
+                    return
+        console.print("[yellow]No code found in last response[/yellow]")
 
     def _cmd_attack_from_dir(self, text: str):
         """Actively exploit findings from scan directory using P-E-R."""
