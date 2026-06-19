@@ -258,46 +258,58 @@ class ChatSession:
     def _extract_tool_commands(self, text: str) -> list:
         """Extract commands and save code blocks as files."""
         cmds = []
+        save_dir_py = Path("output") / "chat" / "exploits"
+        save_dir_sh = Path("output") / "chat" / "scripts"
 
-        # Save ```python blocks as .py files in output/chat/
-        for m in re.finditer(r'```python\n(.+?)\n```', text, re.DOTALL):
+        # Save ALL ```python blocks as .py (lazy regex, works with/without trailing newline)
+        for m in re.finditer(r'```python\n(.*?)```', text, re.DOTALL):
             code = m.group(1).strip()
-            if code and len(code) > 20:
+            if len(code) > 10:
                 try:
-                    save_dir = Path("output") / "chat" / "exploits"
-                    save_dir.mkdir(parents=True, exist_ok=True)
-                    fname = f"exploit_{datetime.now().strftime('%H%M%S')}.py"
-                    (save_dir / fname).write_text(code)
-                    console.print(f"  [green]Saved exploit: {save_dir / fname}[/green]")
-                    # Also offer to run it
-                    cmds.append(f"python3 {save_dir / fname}")
+                    save_dir_py.mkdir(parents=True, exist_ok=True)
+                    fname = f"script_{datetime.now().strftime('%H%M%S')}.py"
+                    (save_dir_py / fname).write_text(code)
+                    console.print(f"  Saved: {save_dir_py / fname}")
+                    cmds.append(f"python3 {save_dir_py / fname}")
                 except Exception as e:
-                    console.print(f"  [red]Failed to save exploit: {e}[/red]")
+                    console.print(f"  Save error: {e}")
 
-        # Save ```bash blocks as .sh files
-        for m in re.finditer(r'```bash\n(.+?)\n```', text, re.DOTALL):
+        # Save ```bat, ```cmd, ```powershell blocks
+        for lang, ext in [("bat", "bat"), ("cmd", "bat"), ("powershell", "ps1")]:
+            for m in re.finditer(r'```' + lang + r'\n(.*?)```', text, re.DOTALL):
+                code = m.group(1).strip()
+                if len(code) > 10:
+                    try:
+                        save_dir_sh.mkdir(parents=True, exist_ok=True)
+                        fname = f"script_{datetime.now().strftime('%H%M%S')}.{ext}"
+                        (save_dir_sh / fname).write_text(code)
+                        console.print(f"  Saved: {save_dir_sh / fname}")
+                    except Exception:
+                        pass
+
+        # Save ```bash blocks as .sh
+        for m in re.finditer(r'```bash\n(.*?)```', text, re.DOTALL):
             code = m.group(1).strip()
-            if code and len(code) > 20 and any(x in code for x in ["#!/", "chmod", "curl", "wget", "nc", "bash"]):
+            if len(code) > 10:
                 try:
-                    save_dir = Path("output") / "chat" / "scripts"
-                    save_dir.mkdir(parents=True, exist_ok=True)
+                    save_dir_sh.mkdir(parents=True, exist_ok=True)
                     fname = f"script_{datetime.now().strftime('%H%M%S')}.sh"
-                    (save_dir / fname).write_text(code)
-                    console.print(f"  [green]Saved script: {save_dir / fname}[/green]")
+                    (save_dir_sh / fname).write_text(code)
+                    console.print(f"  Saved: {save_dir_sh / fname}")
                 except Exception:
                     pass
 
-        # Match ```tool blocks
-        for m in re.finditer(r'```tool\n(.+?)\n```', text, re.DOTALL):
+        # Extract ```tool commands
+        for m in re.finditer(r'```tool\n(.*?)```', text, re.DOTALL):
             c = m.group(1).strip()
-            if c and not c.startswith("#"):
+            if c:
                 cmds.append(c)
 
-        # Match ```bash blocks - only known tools
+        # Fallback: ```bash blocks with known tools
         if not cmds:
             known = set(self.tools.available_tools().keys())
             known.update(["cat", "ls", "find", "grep", "head", "tail", "echo", "dig", "ping", "nc", "nslookup", "python3", "python", "ruby", "perl"])
-            for m in re.finditer(r'```(?:bash|sh)?\n(.+?)\n```', text, re.DOTALL):
+            for m in re.finditer(r'```(?:bash|sh)?\n(.*?)```', text, re.DOTALL):
                 c = m.group(1).strip()
                 first_word = c.split()[0] if c else ""
                 if first_word in known:
