@@ -50,7 +50,6 @@ class SuvariCore:
         from .agents.exploiter import ExploiterAgent
         SYSTEM_PROMPT = self._get_system_prompt()
 
-        self.history.append({"role": "user", "content": user_input})
         context = f"Available tools: {', '.join(sorted(self.tools.available_tools().keys()))}"
 
         # Detect scan directory in input and load findings
@@ -72,23 +71,39 @@ class SuvariCore:
         if target_dir:
             findings_file = target_dir / "analysis" / "findings.json"
             report_file = target_dir / "report.md"
+            loaded_findings = ""
             if findings_file.exists():
                 try:
                     data = json.loads(findings_file.read_text())
                     vulns = data.get("vulnerabilities", [])
                     if vulns:
-                        context += "\n\nExisting findings:\n"
+                        lines = []
                         for v in vulns[:10]:
-                            context += f"[{v.get('severity','?')}] {v.get('type','?')} @ {v.get('location','?')}\n"
+                            sev = v.get("severity", "?")
+                            typ = v.get("type", "?")
+                            loc = v.get("location", "?")
+                            desc = v.get("description", "")[:120]
+                            lines.append(f"[{sev}] {typ} @ {loc}")
+                            if desc:
+                                lines.append(f"  {desc}")
+                        loaded_findings = "\n".join(lines)
+                        context += f"\n\nEXISTING FINDINGS:\n{loaded_findings}"
                 except Exception:
                     pass
-            if report_file.exists():
+            if report_file.exists() and not loaded_findings:
                 report_text = report_file.read_text()
-                # Limit report context to avoid LLM slowdown
-                report_lines = report_text.split("\n")
-                summary_only = [l for l in report_lines if any(x in l for x in ["Critical", "High", "Medium", "Low", "Total", "Summary", "##", "Finding"])]
-                context += f"\nReport: {' | '.join(summary_only[:10])}" if summary_only else f"\nReport: {report_text[:800]}"
+                summary_lines = [l for l in report_text.split("\n") if any(x in l for x in ["Critical", "High", "Medium", "Low", "Total", "##"])]
+                if summary_lines:
+                    context += f"\n\nREPORT SUMMARY:\n" + "\n".join(summary_lines[:10])
             self.last_scan_dir = target_dir
+
+        # Replace raw path in user message with findings context for the AI
+        if raw_path:
+            user_input_for_ai = f"[Scan results loaded - {target_dir.name if target_dir else ''}] {' '.join(user_input.split()[1:])}"
+        else:
+            user_input_for_ai = user_input
+
+        self.history.append({"role": "user", "content": user_input_for_ai})
 
         response = ""
         display_text = ""
