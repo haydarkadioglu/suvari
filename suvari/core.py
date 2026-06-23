@@ -54,9 +54,21 @@ class SuvariCore:
         context = f"Available tools: {', '.join(sorted(self.tools.available_tools().keys()))}"
 
         # Detect scan directory in input and load findings
+        # Handle both file paths and directory paths
         path_match = re.search(r'(/home/[^\s]*output/[^\s]+)', user_input)
-        scan_dir_input = Path(path_match.group(1)) if path_match else None
-        target_dir = scan_dir_input or self.last_scan_dir
+        raw_path = Path(path_match.group(1)) if path_match else None
+        target_dir = None
+        if raw_path:
+            if raw_path.is_dir():
+                target_dir = raw_path
+            elif raw_path.is_file():
+                target_dir = raw_path.parent
+                # Stop climbing at "output" level
+                while target_dir.name != "output" and target_dir.parent != target_dir:
+                    if (target_dir / "analysis" / "findings.json").exists() or (target_dir / "report.md").exists():
+                        break
+                    target_dir = target_dir.parent
+        target_dir = target_dir or self.last_scan_dir
         if target_dir:
             findings_file = target_dir / "analysis" / "findings.json"
             report_file = target_dir / "report.md"
@@ -81,7 +93,10 @@ class SuvariCore:
         for turn in range(max_rounds):
             msgs = [{"role": "system", "content": SYSTEM_PROMPT + "\n\n" + context}]
             msgs += self.history[-10:]
-            response = self.llm.chat(messages=msgs, temperature=0.3, max_tokens=1024)
+            try:
+                response = self.llm.chat(messages=msgs, temperature=0.3, max_tokens=1024)
+            except Exception as e:
+                response = str(e)
 
             # Extract and save code blocks
             saved = set()
