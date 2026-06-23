@@ -52,6 +52,29 @@ class SuvariCore:
 
         self.history.append({"role": "user", "content": user_input})
         context = f"Available tools: {', '.join(sorted(self.tools.available_tools().keys()))}"
+
+        # Detect scan directory in input and load findings
+        path_match = re.search(r'(/home/[^\s]*output/[^\s]+)', user_input)
+        scan_dir_input = Path(path_match.group(1)) if path_match else None
+        target_dir = scan_dir_input or self.last_scan_dir
+        if target_dir:
+            findings_file = target_dir / "analysis" / "findings.json"
+            report_file = target_dir / "report.md"
+            if findings_file.exists():
+                try:
+                    data = json.loads(findings_file.read_text())
+                    vulns = data.get("vulnerabilities", [])
+                    if vulns:
+                        context += "\n\nExisting findings:\n"
+                        for v in vulns[:10]:
+                            context += f"[{v.get('severity','?')}] {v.get('type','?')} @ {v.get('location','?')}\n"
+                except Exception:
+                    pass
+            if report_file.exists():
+                report_text = report_file.read_text()
+                context += f"\nReport summary:\n{report_text[:1500]}"
+            self.last_scan_dir = target_dir
+
         response = ""
         display_text = ""
 
@@ -155,11 +178,13 @@ class SuvariCore:
         return r.read_text()[:3000] if r.exists() else ""
 
     def _get_system_prompt(self) -> str:
+        """System prompt for chat."""
         return """You are Suvari, an AI-powered pentesting assistant for AUTHORIZED testing only.
 
-YOUR ROLE: Write exploits, payloads, and testing scripts. Assume authorized testing.
-
-Write code in ```python or ```bash blocks. Code is auto-saved and executed.
+YOUR ROLE: Analyze scan findings and suggest/execute exploitation steps.
+Given existing findings (vulnerabilities), explain how to exploit each one.
+Write code in ```python or ```bash blocks. Code is auto-saved.
+Run tools in ```tool blocks to verify or exploit findings.
 Respond in the user's language."""
 
     def _load_results(self, path: Path) -> dict:
