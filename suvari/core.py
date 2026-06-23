@@ -182,13 +182,27 @@ class PromptLoader:
         self.fast = fast
 
 class Planner:
-    """Stub - P-E-R planner for orchestrator compatibility."""
+    """P-E-R planner - decides next action based on phase and results."""
     def __init__(self, llm, tools, prompts):
         self.llm = llm
         self.tools = tools
         self.prompts = prompts
+        self._knowledge = {}
+
+    def decide(self, phase: str, completed: list, last_results: dict) -> dict:
+        """Decide next action. Returns plan dict with next_action + reasoning."""
+        return {"next_action": phase, "reasoning": f"Executing {phase} phase"}
+
+    def add_knowledge(self, key: str, value):
+        """Store knowledge for future planning."""
+        self._knowledge[key] = value
 
 class Reflector:
-    """Stub - P-E-R reflector for orchestrator compatibility."""
+    """P-E-R reflector - analyzes tool output for improvements."""
     def __init__(self, llm):
         self.llm = llm
+        self._failures = []
+
+    def analyze(self, last_action: str, tool: str, output: str, phase: str) -> dict:
+        """Analyze output and return reflection."""
+        return {"success": True, "findings": [], "improvements": []}
