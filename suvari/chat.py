@@ -54,8 +54,10 @@ def start():
                 console.print(r.read_text()[:2000])
         else:
             # P-E-R via core
+            console.print("[dim]Processing...[/dim]", end="\r")
             response = core.chat(text, session_file=Path(session_file) if session_file else None)
             if response:
+                console.print(" " * 20, end="\r")  # Clear "Processing..."
                 console.print(response)
 
         console.print("[dim]─" * 50 + "[/dim]")

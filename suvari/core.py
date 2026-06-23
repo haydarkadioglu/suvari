@@ -84,7 +84,10 @@ class SuvariCore:
                     pass
             if report_file.exists():
                 report_text = report_file.read_text()
-                context += f"\nReport summary:\n{report_text[:1500]}"
+                # Limit report context to avoid LLM slowdown
+                report_lines = report_text.split("\n")
+                summary_only = [l for l in report_lines if any(x in l for x in ["Critical", "High", "Medium", "Low", "Total", "Summary", "##", "Finding"])]
+                context += f"\nReport: {' | '.join(summary_only[:10])}" if summary_only else f"\nReport: {report_text[:800]}"
             self.last_scan_dir = target_dir
 
         response = ""
