@@ -203,6 +203,6 @@ class Reflector:
         self.llm = llm
         self._failures = []
 
-    def analyze(self, last_action: str, tool: str, output: str, phase: str, target_url: str = "") -> dict:
+    def analyze(self, last_action: str = "", tool: str = "", output: str = "", phase: str = "", target_url: str = "") -> dict:
         """Analyze output and return reflection."""
         return {"success": True, "findings": [], "improvements": []}
