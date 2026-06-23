@@ -11,7 +11,6 @@ from .orchestrator import SuvariOrchestrator
 from .workspace import Workspace
 from .config import configure_interactive, load_config
 from .mode import ScanMode
-from .chat import ChatSession
 
 console = Console()
 app = typer.Typer(
@@ -160,8 +159,8 @@ def list():
 def chat():
     """Interactive pentesting chat — talk to Suvari naturally"""
     banner()
-    session = ChatSession()
-    session.run()
+    from .chat import start
+    start()
 
 
 @app.command()
