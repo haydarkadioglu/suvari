@@ -211,71 +211,39 @@ class SuvariOrchestrator:
         self._suggest_next_targets()
 
     def _suggest_next_targets(self):
-        """Suggest related targets based on scan findings."""
+        """Suggest related targets based on actual scan findings (not generic)."""
         console = Console()
-        recon = self.context.get("recon_results", {})
         analysis = self.context.get("analysis", {})
-        browser = self.context.get("browser_info", {})
+        vulns = analysis.get("vulnerabilities", [])
         suggestions = []
 
-        all_text = str(recon) + str(browser) + str(analysis)
+        # Based on actual vulnerabilities found
+        vuln_types = set(v.get("type", "").lower() for v in vulns)
+        if "cors" in vuln_types:
+            suggestions.append("[cors] CORS open - try CSRF + auth bypass chain")
+        if "xss" in vuln_types:
+            suggestions.append("[xss] XSS found - try session stealing, phishing")
+        if "sql" in " ".join(vuln_types):
+            suggestions.append("[sqli] SQL injection - try data extraction via sqlmap")
+        if "exposure" in vuln_types or "env" in vuln_types:
+            suggestions.append("[config] Sensitive file exposed - check for credentials and API keys")
+        if "clickjacking" in vuln_types:
+            suggestions.append("[clickjack] Clickjacking - try frame-based phishing PoC")
 
-        # Email addresses -> suggest credential testing
-        emails = set(__import__('re').findall(r'[\w.+-]+@[\w-]+\.[\w.]+', all_text))
-        for email in list(emails)[:3]:
-            domain = email.split("@")[1]
-            suggestions.append(f"[email] {email} -> try password spray on {domain} services")
+        # Technology-specific (only if found, not generic)
+        techs = str(self.context.get("browser_info", {}).get("tech", []))
+        techs += str(self.context.get("recon_results", {}).get("whatweb", ""))
+        if techs and "wordpress" in techs.lower():
+            suggestions.append("[cms] WordPress - try wpscan for plugin CVEs and user enum")
 
-        # Subdomains found
-        if "subdomain" in all_text.lower():
-            suggestions.append("[dns] Found subdomains - they may host different services or bypass WAF")
-
-        # CloudFlare detected -> suggest origin IP
-        cf_terms = ["cloudflare", "cloudflare-nginx", "__cfduid"]
-        if any(t in all_text.lower() for t in cf_terms):
-            suggestions.append("[waf] CloudFlare detected -> try origin IP via Shodan/iphistory")
-            suggestions.append("[waf] Check if any subdomain resolves to real IP (CloudFlare bypass)")
-
-        # Ports -> suggest service-specific scans
-        ports_found = __import__('re').findall(r'(\d+)/tcp', all_text)
-        for port in ports_found:
-            port = int(port)
-            if port == 3306:
-                suggestions.append(f"[db] Port {port} (MySQL) open -> try brute force or known CVEs")
-            elif port == 5432:
-                suggestions.append(f"[db] Port {port} (PostgreSQL) open -> check default credentials")
-            elif port == 6379:
-                suggestions.append(f"[db] Port {port} (Redis) open -> try unauthenticated access")
-            elif port == 27017:
-                suggestions.append(f"[db] Port {port} (MongoDB) open -> try unauthenticated access")
-            elif port in (22,):
-                suggestions.append(f"[ssh] Port {port} (SSH) open -> try brute force with known usernames")
-            elif port in (8080, 8443):
-                suggestions.append(f"[web] Port {port} open -> may bypass WAF, scan directly")
-
-        # Technology-specific
-        techs = str(browser.get("tech", [])) + str(recon.get("whatweb", ""))
-        if "wordpress" in techs.lower():
-            suggestions.append("[cms] WordPress detected -> try wpscan for plugin/theme vulnerabilities")
-        if "php" in techs.lower() or "php" in all_text.lower():
-            suggestions.append("[lang] PHP detected -> check for LFI, RFI, deserialization")
-        if "asp" in techs.lower() or "aspx" in techs.lower() or "iis" in techs.lower():
-            suggestions.append("[lang] ASP.NET detected -> check for viewstate, deserialization")
-
-        # SMB shares
-        if any(x in all_text.lower() for x in ["smb", "445", "netbios", "enum4linux"]):
-            suggestions.append("[smb] SMB shares found -> try anonymous access, check for vulnerabilities")
-
-        # .env exposure
-        if ".env" in all_text or "environment" in all_text.lower():
-            suggestions.append("[config] .env exposed -> check for AWS keys, DB passwords, API tokens")
+        # Missing security headers
+        if any("header" in v.get("type", "").lower() or "missing" in v.get("type", "").lower() for v in vulns):
+            suggestions.append("[header] Security headers missing - try HSTS bypass, cookie injection")
 
         if suggestions:
-            console.print("\n[bold yellow]Recommended next targets:[/bold yellow]")
-            for s in suggestions[:8]:
+            console.print("\n[bold yellow]Next steps:[/bold yellow]")
+            for s in suggestions[:5]:
                 console.print(f"  {s}")
-        else:
-            console.print("\n[dim]No additional targets suggested.[/dim]")
 
     def _run_phase(self, phase_id: str):
         self.logger.info("phase", f"Starting: {phase_id}")
@@ -480,10 +448,15 @@ class SuvariOrchestrator:
         from .chain import CausalChain
         console = Console()
 
-        # Phase A: Run standard scanner
+        # Phase A: Run standard scanner (with fast mode optimization)
         console.print("  Phase A: AI-driven tool selection")
-        scanner = ScannerAgent("scanner", self.llm, self.ws, self.tools)
-        scan_results = scanner.run(self.context) or {}
+        scanner = ScannerAgent("scanner", self.llm, self.ws, self.tools, verbose=False)
+        if self.context.get("fast"):
+            # Fast mode: quick tech check + key vuln scans only
+            console.print("  [dim]Fast mode: nuclei (high/med) + curl endpoints[/dim]")
+            scan_results = scanner.run({**self.context, "fast": True, "tool_limit": 3}) or {}
+        else:
+            scan_results = scanner.run(self.context) or {}
 
         # Phase B: Causal chain for deeper analysis
         if self.chain_mode:
