@@ -50,7 +50,28 @@ class SuvariCore:
         from .agents.exploiter import ExploiterAgent
         SYSTEM_PROMPT = self._get_system_prompt()
 
-        context = f"Available tools: {', '.join(sorted(self.tools.available_tools().keys()))}"
+        # Build categorized tool list for AI
+        avail = self.tools.available_tools()
+        categories = {
+            "Network": ["nmap","masscan","rustscan","unicornscan","arp-scan","zmap"],
+            "Web/Discovery": ["gobuster","ffuf","feroxbuster","dirb","dirsearch","katana","hakrawler","wfuzz"],
+            "Web/Vuln": ["nuclei","nikto","wpscan","jaeles","dalfox","xsstrike","skipfish","wapiti"],
+            "Web/Tech": ["whatweb","httpx","wafw00f"],
+            "Exploit": ["sqlmap","hydra","medusa","ncrack","crowbar","metasploit","msfvenom"],
+            "OSINT/DNS": ["subfinder","amass","theharvester","dnsenum","dnsrecon","fierce","gau","waybackurls"],
+            "SMB/Windows": ["enum4linux","smbmap","rpcclient","netexec"],
+            "Utils": ["curl","jq","socat","proxychains","openssl","sslscan","sslyze"],
+            "Password": ["john","hashcat","cewl","crunch","rsmangler"],
+            "Stego/Forensics": ["binwalk","foremost","strings","exiftool","steghide","volatility"],
+        }
+        cat_lines = []
+        for cat, tools in categories.items():
+            present = [t for t in tools if t in avail]
+            if present:
+                cat_lines.append(f"  [{cat}] {' '.join(present)}")
+        tool_context = "\n".join(cat_lines)
+        context = f"Available tools by category:\n{tool_context}\n\nUse ```tool <command>``` blocks to run tools."
+        context += f"\n\nTotal: {len(avail)} tools on system."
 
         # Detect scan directory in input and load findings
         # Handle both file paths and directory paths
@@ -159,12 +180,21 @@ class SuvariCore:
             for cmd in cmds[:3]:
                 try:
                     if "|" in cmd:
-                        r = sp.run(cmd, shell=True, capture_output=True, text=True, timeout=60)
-                        output = (r.stdout + r.stderr)[:2000]
+                        r = sp.run(cmd, shell=True, capture_output=True, text=True, timeout=300)
+                        output = (r.stdout + r.stderr)
                     else:
-                        output = self.tools.run(shlex.split(cmd), timeout=60)[:2000]
+                        output = self.tools.run(shlex.split(cmd), timeout=300, max_output_len=50_000)
+                except sp.TimeoutExpired:
+                    output = "(TIMEOUT — site yanıt vermiyor olabilir)"
                 except Exception as e:
                     output = f"(error: {e})"
+
+                # Show tool execution to user
+                print(f"\n  🔧 $ {cmd[:120]}")
+                if "\n" in output[:200]:
+                    print(f"  {output[:200]}")
+                else:
+                    print(f"  {output[:80]}")
 
             # Feed results back to AI
             self.history.append({"role": "assistant", "content": response})
