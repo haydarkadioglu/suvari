@@ -47,6 +47,12 @@ PROVIDERS = {
         "env_key": None,
         "default_model": "llama3",
     },
+    "lmstudio": {
+        "name": "LM Studio (local)",
+        "models": ["local-model"],
+        "env_key": None,
+        "default_model": "local-model",
+    },
 }
 
 

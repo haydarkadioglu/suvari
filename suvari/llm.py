@@ -53,6 +53,18 @@ class LLMClient:
             "env_key": None,
             "api_type": "openai",
         },
+        "lmstudio": {
+            "base_url": "http://localhost:1234/v1",
+            "models": ["local-model"],
+            "env_key": None,
+            "api_type": "openai",
+        },
+        "custom": {
+            "base_url": "http://localhost:8000/v1",
+            "models": ["custom"],
+            "env_key": None,
+            "api_type": "openai",
+        },
     }
 
     def __init__(self, provider: str = "openai", model: Optional[str] = None):
