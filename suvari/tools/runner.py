@@ -7,7 +7,13 @@ import subprocess
 import shutil
 import re
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Callable
+
+# Critical patterns to preserve from truncation
+_CRITICAL_PATTERNS = re.compile(
+    r'\[?(critical|high|CRITICAL|HIGH|cve-\d{4}|vulnerability|VULNERABILITY|exposed|EXPOSED|sql\s*inj|XSS|rce|RCE|LFI|SSRF)\]?',
+    re.IGNORECASE
+)
 
 
 # ANSI escape sequence cleaner
@@ -27,8 +33,12 @@ class ToolRunner:
         self._cache = {}  # Instance-level cache, not shared across sessions
         self._MAX_CACHE = 100
 
-    def run(self, cmd: list, timeout: int = 120, workdir: Optional[Path] = None) -> str:
-        """Run a command with caching. Same cmd+target -> cached result."""
+    def run(self, cmd: list, timeout: int = 120, workdir: Optional[Path] = None,
+            max_output_len: int = 50_000) -> str:
+        """Run a command with caching. Same cmd+target -> cached result.
+        
+        max_output_len: if output exceeds this, smart-truncate preserving critical lines.
+        """
         # Create cache key from command and working directory
         cache_key = (tuple(cmd), str(workdir))
         if cache_key in self._cache:
@@ -50,10 +60,93 @@ class ToolRunner:
                 cwd=workdir,
             )
             output = clean_ansi(result.stdout + result.stderr)
+            output = self._smart_truncate(output, max_output_len) if len(output) > max_output_len else output
             self._cache[cache_key] = output
             return output.strip() if output else "(empty)"
         except subprocess.TimeoutExpired:
             self._cache[cache_key] = f"(TIMEOUT after {timeout}s)"
+            return self._cache[cache_key]
+        except FileNotFoundError:
+            self._cache[cache_key] = f"(tool not found: {cmd[0]})"
+            return self._cache[cache_key]
+        except Exception as e:
+            self._cache[cache_key] = f"(error: {e})"
+            return self._cache[cache_key]
+
+    def _smart_truncate(self, text: str, max_len: int) -> str:
+        """Truncate text but preserve critical lines (CVEs, vulnerabilities, etc.)."""
+        lines = text.splitlines(keepends=False)
+        if not lines or len(text) <= max_len:
+            return text
+
+        # Identify critical lines
+        critical_lines = []
+        normal_lines = []
+        for line in lines:
+            stripped = line.strip()
+            if not stripped:
+                normal_lines.append(line)
+            elif _CRITICAL_PATTERNS.search(stripped):
+                critical_lines.append(line)
+            else:
+                normal_lines.append(line)
+
+        # Always preserve critical lines at the top
+        # Then head + tail of normal lines
+        head = normal_lines[:20]  # first 20 normal lines
+        tail = normal_lines[-10:]  # last 10 normal lines
+        mid_note = f"... [truncated: {len(normal_lines) - len(head) - len(tail)} normal lines] ..."
+
+        selected = critical_lines + [""] + head + [mid_note] + tail
+        result = "\n".join(selected)
+
+        # If still too long, hard truncate keeping critical lines + head only
+        if len(result) > max_len:
+            result = "\n".join(critical_lines) + "\n... [hard truncation: output too large for Analyzer] ..."
+
+        return result
+
+    def run_priority(self, cmd: list, timeout: int = 120, workdir: Optional[Path] = None,
+                     priority_callback: Optional[Callable[[str], None]] = None) -> str:
+        """Run a command and optionally stream partial results via callback.
+        
+        Useful for long-running tools — callback gets each line as it arrives.
+        """
+        cache_key = (tuple(cmd), str(workdir))
+        if cache_key in self._cache:
+            if self.verbose:
+                print(f"  [cache] reused: {' '.join(cmd)[:80]}")
+            return self._cache[cache_key]
+
+        if len(self._cache) >= self._MAX_CACHE:
+            self._cache.pop(next(iter(self._cache)))
+        if self.verbose:
+            print(f"  [exec] {' '.join(cmd)[:120]}")
+
+        output_parts = []
+        proc = None
+        try:
+            proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                cwd=workdir,
+            )
+            if proc.stdout:
+                for line in iter(proc.stdout.readline, ""):
+                    clean = clean_ansi(line)
+                    output_parts.append(clean)
+                    if priority_callback and _CRITICAL_PATTERNS.search(clean):
+                        priority_callback(clean.strip())
+            proc.wait(timeout=timeout)
+            output = "".join(output_parts)
+            self._cache[cache_key] = output
+            return output.strip() if output else "(empty)"
+        except subprocess.TimeoutExpired:
+            if proc:
+                proc.kill()
+            self._cache[cache_key] = "(TIMEOUT)"
             return self._cache[cache_key]
         except FileNotFoundError:
             self._cache[cache_key] = f"(tool not found: {cmd[0]})"
