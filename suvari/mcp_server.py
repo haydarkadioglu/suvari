@@ -1,158 +1,99 @@
-"""
-Suvari MCP Server — exposes Suvari's capabilities as MCP tools.
-Compatible with Claude Desktop, Cursor, VS Code Copilot, and any MCP client.
+"""Suvari MCP Server — individual Kali tools as MCP tools.
+Each available Kali tool is its own MCP tool for AI agents.
 """
 
+import sys
+import logging
+from typing import Literal
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 from pathlib import Path
-from .orchestrator import SuvariOrchestrator
-from .workspace import Workspace
-from .config import load_config
 from .tools.runner import ToolRunner
-from .mode import ScanMode
+
+# Suppress MCP internal noise
+logging.getLogger("mcp").setLevel(logging.WARNING)
+
+mcp = FastMCP("Suvari — AI Pentester",
+    instructions="80+ Kali Linux security tools as individual MCP tools. Use run_tool for any tool, or call the specific tool directly.",
+    transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False),
+)
+
+_runner = None
+def _get_runner():
+    global _runner
+    if _runner is None:
+        _runner = ToolRunner()
+    return _runner
 
 
-mcp = FastMCP("Suvari — AI Pentester")
-
-def _get_llm():
-    from .llm import LLMClient
-    cfg = load_config()
-    return LLMClient(provider=cfg.get("provider", "deepseek"), model=cfg.get("model"))
-
-
-@mcp.tool()
-def scan_target(
-    url: str,
-    fast: bool = False,
-    server: bool = False,
-) -> str:
-    """
-    Run a full security scan on a target URL.
-    Performs recon, vulnerability scanning, AI analysis, and generates a report.
-
-    Args:
-        url: Target URL (e.g. https://example.com)
-        fast: Fast mode - fewer tests, quicker results
-        server: Server mode - scan all ports and services (SSH, FTP, SMB, etc.)
-
-    Returns:
-        Scan results summary with findings and report path.
-    """
-    try:
-        ws = Workspace(url)
-        orchestrator = SuvariOrchestrator(
-            target_url=url,
-            workspace=ws,
-            recon_only=False,
-            fast=fast,
-            verbose=False,
-            scan_mode=ScanMode.AUTO,
-            server_scan=server,
-        )
-        orchestrator.run()
-        analysis = orchestrator.context.get("analysis", {})
-        summary = analysis.get("summary", {})
-        vulns = analysis.get("vulnerabilities", [])
-        result = f"Scan complete for {url}\n"
-        result += f"Findings: {summary.get('total', 0)} total "
-        result += f"({summary.get('critical', 0)} critical, {summary.get('high', 0)} high, "
-        result += f"{summary.get('medium', 0)} medium)\n\n"
-        for v in vulns[:5]:
-            result += f"- [{v.get('severity','?')}] {v.get('type','?')}: {v.get('location','')}\n"
-        result += f"\nReport: {ws.path / 'report.md'}"
-        return result
-    except Exception as e:
-        return f"Scan error: {e}"
-
-
-@mcp.tool()
-def recon_target(url: str) -> str:
-    """
-    Run reconnaissance only on a target URL.
-    Quickly gathers technology info, open ports, and basic exposure.
-
-    Args:
-        url: Target URL
-
-    Returns:
-        Reconnaissance results: technology stack, open ports, exposed files.
-    """
-    try:
-        from .agents.recon import ReconAgent
-        llm = _get_llm()
-        ws = Workspace(f"recon-{url.split('/')[-1]}")
-        tr = ToolRunner()
-        agent = ReconAgent("recon", llm, ws, tr)
-        results = agent.run({"target_url": url, "fast": True})
-        out = f"Recon complete for {url}\n\n"
-        if results.get("whatweb"):
-            out += f"Technology:\n{results['whatweb'][:400]}\n\n"
-        if results.get("nmap"):
-            out += f"Ports:\n{results['nmap'][:400]}\n\n"
-        if results.get("common_paths"):
-            out += f"Exposed paths:\n{results['common_paths'][:200]}\n"
-        return out
-    except Exception as e:
-        return f"Recon error: {e}"
-
+# ── Generic tool runner (catch-all) ────────────────────────────────────────
 
 @mcp.tool()
 def run_tool(
     tool: str,
-    target: str,
+    target: str = "",
     args: str = "",
+    timeout: int = 120,
 ) -> str:
     """
-    Run a specific security tool against a target.
+    Run any Kali Linux security tool against a target.
+    Use this when there's no dedicated tool or you need custom parameters.
 
     Args:
-        tool: Tool name (e.g. nmap, nuclei, gobuster, sqlmap, whatweb, nikto)
+        tool: Tool name (e.g. nmap, nuclei, gobuster, whatweb, nikto, curl, sqlmap)
         target: Target URL or host
-        args: Additional arguments as space-separated string (e.g. "-T4 -F")
+        args: Additional tool arguments (e.g. "-T4 -F" for nmap, "dir" for gobuster subcommand)
+        timeout: Max execution time in seconds (default 120)
 
     Returns:
         Tool output.
     """
+    runner = _get_runner()
+    avail = runner.available_tools()
+    if tool not in avail:
+        return f"Tool '{tool}' not available on this system."
+
+    host = target.split("://")[-1].split("/")[0]
+    arg_list = args.split() if args else []
+
+    tool_configs = {
+        "nuclei":    ["nuclei"] + arg_list + ["-u", target],
+        "nikto":     ["nikto", "-h", target] + arg_list + ["-nointeractive"],
+        "gobuster":  ["gobuster"] + (arg_list or ["dir"]) + ["-u", target, "-w", "/usr/share/wordlists/dirb/common.txt", "-q"],
+        "ffuf":      ["ffuf"] + arg_list + ["-u", f"{target}/FUZZ", "-w", "/usr/share/wordlists/dirb/common.txt", "-s"],
+        "dirb":      ["dirb", target] + arg_list,
+        "whatweb":   ["whatweb", target] + arg_list,
+        "wpscan":    ["wpscan", "--url", target] + arg_list + ["--no-update"],
+        "nmap":      ["nmap"] + arg_list + [host],
+        "masscan":   ["masscan"] + arg_list + [host],
+        "curl":      ["curl", "-sL", target] + arg_list,
+        "sqlmap":    ["sqlmap", "-u", target, "--batch"] + arg_list,
+        "hydra":     ["hydra"] + arg_list + [host],
+        "wafw00f":   ["wafw00f", target] + arg_list,
+        "dalfox":    ["dalfox", "url", target] + arg_list + ["--silence"],
+        "httpx":     ["httpx", "-u", target] + arg_list,
+        "dnsrecon":  ["dnsrecon", "-d", host] + arg_list,
+        "fierce":    ["fierce", "--domain", host] + arg_list,
+        "dnsenum":   ["dnsenum", host] + arg_list,
+    }
+
     try:
-        tr = ToolRunner()
-        avail = tr.available_tools()
-        if tool not in avail:
-            return f"Tool '{tool}' not available. Available: {', '.join(avail.keys())}"
-
-        arg_list = args.split() if args else []
-        cmd = [tool] + arg_list
-
-        if tool in ("nuclei", "gobuster", "ffuf", "sqlmap"):
-            cmd += ["-u", target]
-        elif tool in ("nikto",):
-            cmd += [target]
-        elif tool == "nmap":
-            cmd += [target.split("://")[-1].split("/")[0]]
-        elif tool == "whatweb":
-            cmd += [target]
-        elif tool == "httpx":
-            cmd += ["-u", target]
-        else:
-            cmd += [target]
-
-        output = tr.run(cmd, timeout=120)
-        return f"[{tool}] {target}\n\n{output[:2000]}"
+        cmd = tool_configs.get(tool, [tool] + arg_list + ([target] if target else []))
+        output = runner.run(cmd, timeout=timeout, max_output_len=100_000)
+        return f"[{tool}] {target}\n\n{output[:8000]}"
     except Exception as e:
-        return f"Tool error: {e}"
+        return f"[{tool}] error: {e}"
 
 
 @mcp.tool()
 def list_available_tools() -> str:
     """
-    List all security tools available on the system.
-
-    Returns:
-        Categorized list of available tools with descriptions.
+    List all Kali Linux security tools available on this system.
     """
-    tr = ToolRunner()
-    avail = tr.available_tools()
+    runner = _get_runner()
+    avail = runner.available_tools()
     if not avail:
-        return "No security tools found."
+        return "No security tools found on this system."
     result = f"Available tools ({len(avail)}):\n\n"
     for name, desc in sorted(avail.items()):
         result += f"  {name}: {desc}\n"
@@ -160,66 +101,194 @@ def list_available_tools() -> str:
 
 
 @mcp.tool()
-def get_scan_report(scan_dir: str) -> str:
+def get_scan_report(scan_dir: str = "") -> str:
     """
-    Get the report from a previous scan.
-
+    Read a previous scan report or list recent scans.
+    
     Args:
-        scan_dir: Path to the scan output directory (from a previous scan)
+        scan_dir: Scan directory name. Leave empty to list recent scans.
+    """
+    output_dir = Path("output")
+    if not scan_dir:
+        if not output_dir.exists():
+            return "No scans yet. Run a scan tool first."
+        dirs = sorted(output_dir.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True)
+        if not dirs:
+            return "No scans found."
+        result = f"Recent scans ({len(dirs)} total):\n\n"
+        for d in dirs[:10]:
+            report = d / "report.md"
+            status = "✓" if report.exists() else "⋯"
+            result += f"  {status} {d.name}\n"
+        return result
+
+    report_path = Path(scan_dir)
+    if not report_path.is_absolute():
+        report_path = output_dir / scan_dir
+    report_file = report_path / "report.md"
+    if not report_file.exists():
+        return f"Report not found."
+    return report_file.read_text()[:8000]
+
+
+# ── Known tool argument templates ──────────────────────────────────────────
+# Tools listed here get smart argument handling. All other tools use generic
+# fallback (tool + args + target).
+
+_KNOWN_CONFIGS = {
+    "nuclei":     (["-u", "{target}"]),
+    "nikto":      (["-h", "{target}", "-nointeractive"]),
+    "gobuster":   (["dir", "-u", "{target}", "-w", "/usr/share/wordlists/dirb/common.txt", "-q"]),
+    "ffuf":       (["-u", "{target}/FUZZ", "-w", "/usr/share/wordlists/dirb/common.txt", "-s"]),
+    "dirb":       (["{target}"]),
+    "whatweb":    (["{target}"]),
+    "wpscan":     (["--url", "{target}", "--no-update"]),
+    "nmap":       (["{host}"]),
+    "masscan":    (["{host}"]),
+    "curl":       (["-sL", "{target}"]),
+    "sqlmap":     (["-u", "{target}", "--batch"]),
+    "hydra":      (["{host}"]),
+    "wafw00f":    (["{target}"]),
+    "dalfox":     (["url", "{target}", "--silence"]),
+    "httpx":      (["-u", "{target}"]),
+    "dnsrecon":   (["-d", "{host}"]),
+    "fierce":     (["--domain", "{host}"]),
+    "dnsenum":    (["{host}"]),
+    "subfinder":  (["-d", "{host}", "-silent"]),
+    "amass":      (["enum", "-d", "{host}"]),
+    "gau":        (["--domain", "{host}"]),
+    "waybackurls":(["{host}"]),
+    "arjun":      (["-u", "{target}"]),
+    "paramspider":(["-d", "{host}"]),
+    "katana":     (["-u", "{target}", "-silent"]),
+    "hakrawler":  (["-u", "{target}", "-plain"]),
+    "sslscan":    (["{host}"]),
+    "sslyze":     (["{host}"]),
+    "theharvester":(["-d", "{host}", "-b", "all"]),
+    "enum4linux": (["{host}"]),
+    "smbmap":     (["-H", "{host}"]),
+}
+
+
+def _make_tool_fn(tool_name: str):
+    """Create an MCP tool function for ANY Kali tool."""
+    def fn(target: str = "", args: str = "", timeout: int = 120) -> str:
+        """Run {tool} against a target."""
+        import logging
+        log = logging.getLogger("suvari.mcp")
+        log.info(f"Tool called: {tool_name} target={target} args={args!r} timeout={timeout}")
+        runner = _get_runner()
+        avail = runner.available_tools()
+        if tool_name not in avail:
+            return f"Tool '{tool_name}' not available on this system."
+        
+        host = target.split("://")[-1].split("/")[0]
+        arg_list = args.split() if args else []
+
+        # Build command: known template or generic fallback
+        if tool_name in _KNOWN_CONFIGS:
+            # Replace {target} and {host} placeholders
+            template = _KNOWN_CONFIGS[tool_name]
+            cmd = [tool_name]
+            if not arg_list and not args:
+                # No custom args: use full template
+                for part in template:
+                    cmd.append(part.replace("{target}", target).replace("{host}", host))
+            else:
+                # Custom args given: use template's initial flags + custom args + target
+                static = [p for p in template if not p.startswith("{")]
+                cmd = [tool_name] + arg_list + static
+                if "{target}" in template:
+                    cmd.append(target)
+                elif "{host}" in template:
+                    cmd.append(host)
+        else:
+            # Generic fallback: tool + args + target
+            cmd = [tool_name] + arg_list + ([target] if target else [])
+
+        try:
+            output = runner.run(cmd, timeout=timeout, max_output_len=100_000)
+            
+            # Smart timeout handling: retry once with longer timeout
+            if output.startswith("(TIMEOUT") and timeout < 300:
+                retry_timeout = min(timeout * 2, 300)
+                log.info(f"  {tool_name} timeout at {timeout}s, retrying with {retry_timeout}s")
+                # For directory busters: reduce thread count on retry
+                if tool_name in ("gobuster", "dirb", "ffuf"):
+                    retry_cmd = cmd + ["-t", "10"] if tool_name == "gobuster" else cmd
+                else:
+                    retry_cmd = cmd
+                output = runner.run(retry_cmd, timeout=retry_timeout, max_output_len=100_000)
+                if output.startswith("(TIMEOUT"):
+                    return f"[{tool_name}] {target} — site yanıt vermiyor veya engelliyor (timeout {retry_timeout}s)"
+            
+            return f"[{tool_name}] {target}\n\n{output[:8000]}"
+        except Exception as e:
+            return f"[{tool_name}] error: {e}"
+
+    fn.__name__ = tool_name
+    fn.__doc__ = f"""Run {tool_name} against a target.
+    
+    Args:
+        target: Target URL or host
+        args: Additional tool arguments
+        timeout: Max execution time in seconds (default 120)
 
     Returns:
-        Scan report content in Markdown.
+        Tool output.
     """
-    try:
-        report = Path(scan_dir) / "report.md"
-        if not report.exists():
-            dirs = list(Path("output").iterdir()) if Path("output").exists() else []
-            return f"Report not found at {scan_dir}. Recent scans: {[d.name for d in sorted(dirs)[-5:]]}"
-        return report.read_text()[:5000]
-    except Exception as e:
-        return f"Error reading report: {e}"
+    return fn
 
 
-@mcp.tool()
-def analyze_ctf(description: str) -> str:
-    """
-    Analyze a CTF challenge based on a description.
-    Finds relevant files in the current directory and suggests tools/approaches.
+# ── Register ALL available tools dynamically ───────────────────────────────
 
+runner_check = _get_runner()
+all_tools = runner_check.available_tools()
+for tool_name in sorted(all_tools.keys()):
+    fn = _make_tool_fn(tool_name)
+    mcp.add_tool(fn, name=tool_name)
+
+logger = logging.getLogger("suvari.mcp")
+logger.info(f"MCP ready: {len(all_tools)} tools registered (all available Kali tools)")
+
+
+# ── Entry point ────────────────────────────────────────────────────────────
+
+def run_mcp(transport: Literal["stdio", "sse", "streamable-http"] = "streamable-http"):
+    """Start the MCP server.
+    
     Args:
-        description: Natural language description of the CTF challenge
-                     (e.g. "pcap file with DNS exfiltration",
-                      "binary with buffer overflow", "steganography in image")
-
-    Returns:
-        Analysis and suggested tools/commands for the challenge.
+        transport: 'streamable-http' (default, POST /mcp),
+                   'stdio' (for Claude Desktop),
+                   or 'sse' (SSE event stream)
     """
-    import subprocess
-    from pathlib import Path
+    if transport == "streamable-http":
+        print(f"\n  ╔═══════════════════════════════════════════════╗", flush=True)
+        print(f"  ║        🐴  SUVARI — AI KALVALRY           ║", flush=True)
+        print(f"  ║     {len(_get_runner().available_tools())} Kali tools ready for battle    ║", flush=True)
+        print(f"  ╚═══════════════════════════════════════════════╝", flush=True)
+        print(f"  🎯  Endpoint: POST /mcp", flush=True)
+        print(f"  🌐  http://localhost:8000/mcp", flush=True)
+        print(f"  📋  Headers: Content-Type: application/json", flush=True)
+        print(f"  🔌  Accept: application/json, text/event-stream", flush=True)
+        print(flush=True)
+    mcp.run(transport=transport)
 
-    cwd = Path.cwd()
-    files = []
-    for f in sorted(cwd.iterdir())[:20]:
-        if f.is_file() and not f.name.startswith("."):
-            try:
-                kind = subprocess.run(["file", "-b", str(f)], capture_output=True, text=True, timeout=5).stdout.strip()[:60]
-                files.append(f"  {f.name}: {kind} ({f.stat().st_size}b)")
-            except Exception:
-                files.append(f"  {f.name}: ({f.stat().st_size}b)")
 
-    file_context = "\n".join(files) if files else "  No files found."
+if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser(description="Suvari MCP — Kali tools for AI agents")
+    parser.add_argument("--sse", action="store_true", help="SSE transport instead of streamable-http")
+    parser.add_argument("--list-tools", action="store_true", help="List all tools and exit")
+    args = parser.parse_args()
 
-    llm = _get_llm()
-    prompt = f"""CTF Challenge: {description}
+    if args.list_tools:
+        runner_check = _get_runner()
+        actual_tools = runner_check.available_tools()
+        print(f"Suvari MCP — {len(actual_tools)} Kali tools available:\n")
+        for name, desc in sorted(actual_tools.items()):
+            print(f"    {name}: {desc}")
+        sys.exit(0)
 
-Files in current directory:
-{file_context}
-
-Suggest specific tools and commands for this CTF challenge.
-Be direct and actionable."""
-
-    try:
-        response = llm.chat(messages=[{"role": "user", "content": prompt}], temperature=0.5, max_tokens=1024)
-        return response
-    except Exception as e:
-        return f"Error: {e}"
+    transport = "sse" if args.sse else "streamable-http"
+    run_mcp(transport)
