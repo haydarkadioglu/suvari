@@ -73,7 +73,8 @@ class SuvariOrchestrator:
 
         self.context = {"target_url": target_url, "fast": fast, "source_dir": source_dir,
                         "mode": scan_mode, "server_scan": server_scan, "parallel": parallel,
-                        "login_creds": login_creds, "browser_type": browser_type}
+                        "login_creds": login_creds, "browser_type": browser_type,
+                        "recon_done": []}
         self.bus = FindingsBus()
 
         # Agents subscribe to relevant findings
@@ -251,6 +252,7 @@ class SuvariOrchestrator:
         if phase_id == "recon":
             console.print(f"  {self.target_url}")
             self.context["recon_results"] = self.recon_agent.run(self.context)
+            self.context["recon_done"] = ["whatweb", "headers", "nmap", "robots", "common_paths"]
             self.logger.info("phase", "Recon complete")
 
         elif phase_id == "scan":
