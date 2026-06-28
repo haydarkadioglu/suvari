@@ -284,6 +284,8 @@ def run_mcp(transport: Literal["stdio", "sse", "streamable-http"] = "streamable-
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="Suvari MCP — Kali tools for AI agents")
+    parser.add_argument("--host", default="127.0.0.1", help="Bind address")
+    parser.add_argument("--port", type=int, default=8000, help="Port")
     parser.add_argument("--sse", action="store_true", help="SSE transport instead of streamable-http")
     parser.add_argument("--list-tools", action="store_true", help="List all tools and exit")
     args = parser.parse_args()
@@ -297,4 +299,7 @@ if __name__ == "__main__":
         sys.exit(0)
 
     transport = "sse" if args.sse else "streamable-http"
-    run_mcp(transport)
+    mcp.settings.host = args.host
+    mcp.settings.port = args.port
+    print(f"Suvari MCP: {transport} on {args.host}:{args.port}")
+    mcp.run(transport=transport)
