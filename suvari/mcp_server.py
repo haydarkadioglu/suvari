@@ -218,6 +218,13 @@ def run_server(host: str = "0.0.0.0", port: int = 8000):
         result = fn(target=data.get("target", ""), args=data.get("args", ""))
         return JSONResponse({"tool": tool, "output": result[:5000]})
 
+    # Build routes - SSE mount LAST so explicit routes take priority
+    from starlette.routing import Mount
+
+    async def mcp_post(scope, receive, send):
+        """Handle POST /mcp by delegating to streamable-http ASGI app."""
+        await streamable_app(scope, receive, send)
+
     app = Starlette(
         routes=[
             Route("/", endpoint=health),
@@ -225,22 +232,13 @@ def run_server(host: str = "0.0.0.0", port: int = 8000):
             Route("/api/tools", endpoint=api_tools, methods=["GET"]),
             Route("/api/run", endpoint=api_run, methods=["POST"]),
             Route("/mcp", endpoint=lambda r: Response("use POST", status_code=405), methods=["GET"]),
+            Mount("/mcp", app=mcp_post),
             Mount("/", app=sse_app),
         ],
         middleware=[
             Middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"]),
         ],
     )
-
-    # Mount streamable-http at /mcp for POST properly
-    async def mcp_handler(scope, receive, send):
-        if scope["method"] == "POST":
-            await streamable_app(scope, receive, send)
-        else:
-            resp = Response("use POST", status_code=405)
-            await resp(scope, receive, send)
-    from starlette.routing import Mount as RMount
-    app.router.routes.append(RMount("/mcp", app=mcp_handler))
 
     # Log POST /mcp via Starlette middleware class
     from starlette.middleware.base import BaseHTTPMiddleware
