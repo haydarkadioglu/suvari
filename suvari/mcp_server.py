@@ -136,6 +136,12 @@ _KNOWN_CONFIGS = {
     "wget":       (["{target}"]),
     "nc":         (["{host}"]),
     "telnet":     (["{host}"]),
+    "python3":    (["-c", "{target}"]),
+    "python":     (["-c", "{target}"]),
+    "perl":       (["-e", "{target}"]),
+    "ruby":       (["-e", "{target}"]),
+    "sh":         (["-c", "{target}"]),
+    "bash":       (["-c", "{target}"]),
 }
 
 def _make_tool_fn(tool_name: str):
