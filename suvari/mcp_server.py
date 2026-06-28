@@ -194,24 +194,22 @@ def run_server(host: str = "0.0.0.0", port: int = 8000):
     # Build unified app
     sse_app = mcp.sse_app()
     streamable_app = mcp.streamable_http_app()
+    from starlette.responses import JSONResponse
+    from starlette.requests import Request
 
-    async def health(request):
-        return JSONResponse({"status": "ok", "tools": len(all_tools), "transport": "multi"})
+    async def health(request: Request):
+        return JSONResponse({"status": "ok", "tools": len(all_tools)})
 
-    async def handle_mcp(scope, receive, send):
-        if scope["method"] == "GET":
-            from starlette.responses import JSONResponse as JR
-            resp = JR({"error": "use POST with JSON-RPC body"}, status_code=405)
-            await resp(scope, receive, send)
-        else:
-            await streamable_app(scope, receive, send)
+    async def mcp_get(request: Request):
+        """GET /mcp returns 405 - use POST."""
+        return JSONResponse({"error": "use POST with JSON-RPC body", "help": "POST {\"jsonrpc\":\"2.0\",\"method\":\"tools/list\",\"id\":1}"}, status_code=405)
 
     routes = [
         Route("/", endpoint=health),
         Route("/health", endpoint=health),
-        # Streamable HTTP at /mcp (no trailing slash redirect)
-        Route("/mcp", endpoint=handle_mcp, methods=["GET", "POST", "OPTIONS"]),
-        # SSE transport at /sse (mount at root so internal routes work)
+        Route("/mcp", endpoint=mcp_get, methods=["GET"]),
+        Mount("/mcp", app=streamable_app),  # POST handled by streamable-http
+        # SSE transport at /sse
         Mount("/", app=sse_app),
     ]
 
