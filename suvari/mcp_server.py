@@ -218,12 +218,8 @@ def run_server(host: str = "0.0.0.0", port: int = 8000):
         result = fn(target=data.get("target", ""), args=data.get("args", ""))
         return JSONResponse({"tool": tool, "output": result[:5000]})
 
-    # Build routes - SSE mount LAST so explicit routes take priority
+    # Build routes - SSE mounted at root, MCP via middleware
     from starlette.routing import Mount
-
-    async def mcp_post(scope, receive, send):
-        """Handle POST /mcp by delegating to streamable-http ASGI app."""
-        await streamable_app(scope, receive, send)
 
     app = Starlette(
         routes=[
@@ -231,8 +227,6 @@ def run_server(host: str = "0.0.0.0", port: int = 8000):
             Route("/health", endpoint=health),
             Route("/api/tools", endpoint=api_tools, methods=["GET"]),
             Route("/api/run", endpoint=api_run, methods=["POST"]),
-            Route("/mcp", endpoint=lambda r: Response("use POST", status_code=405), methods=["GET"]),
-            Mount("/mcp", app=mcp_post),
             Mount("/", app=sse_app),
         ],
         middleware=[
@@ -240,23 +234,39 @@ def run_server(host: str = "0.0.0.0", port: int = 8000):
         ],
     )
 
-    # Log POST /mcp via Starlette middleware class
+    # Add MCP routing via middleware (before SSE catch-all)
     from starlette.middleware.base import BaseHTTPMiddleware
 
-    class MCPLogMiddleware(BaseHTTPMiddleware):
+    class MCPRouterMiddleware(BaseHTTPMiddleware):
         async def dispatch(self, request, call_next):
             if request.method == "POST" and request.url.path == "/mcp":
-                body = await request.body()
-                log.info(f"POST /mcp from {request.client.host}: {body[:300]}")
-            response = await call_next(request)
-            if request.method == "POST" and request.url.path == "/mcp":
-                resp_body = b"".join([chunk async for chunk in response.body_iterator])
-                log.info(f"Response ({response.status_code}): {resp_body[:300]}")
-                return Response(content=resp_body, status_code=response.status_code,
-                              media_type="application/json", headers=dict(response.headers))
-            return response
+                # Forward to streamable-http ASGI app
+                from starlette.responses import Response
+                scope = request.scope
+                # Set path to root since streamable_app expects /
+                scope["path"] = "/"
+                scope["root_path"] = ""
+                # Create a send wrapper to capture response
+                response_body = []
+                send_wrapper = None
 
-    app.add_middleware(MCPLogMiddleware)
+                async def send(message):
+                    if message["type"] == "http.response.start":
+                        nonlocal send_wrapper
+                        send_wrapper = message
+                    elif message["type"] == "http.response.body":
+                        response_body.append(message.get("body", b""))
+
+                await streamable_app(scope, request.receive, send)
+                body = b"".join(response_body)
+                log.info(f"MCP response: {body[:300]}")
+                return Response(content=body, media_type="application/json",
+                              status_code=send_wrapper.get("status", 200) if send_wrapper else 200)
+            if request.method == "GET" and request.url.path == "/mcp":
+                return Response("use POST", status_code=405)
+            return await call_next(request)
+
+    app.add_middleware(MCPRouterMiddleware)
 
     print(f"Suvari MCP on {host}:{port}")
     print(f"  /mcp       - POST streamable-http")
