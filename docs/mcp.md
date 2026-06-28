@@ -1,74 +1,104 @@
-# MCP Server
+# Suvari MCP Server
 
-Suvari can run as an MCP (Model Context Protocol) server, exposing its security tools to any MCP-compatible AI client: Claude Desktop, Cursor, VS Code Copilot, and others.
+Suvari exposes 75+ Kali Linux tools as MCP (Model Context Protocol) tools.
+AI agents (Claude, Cursor, Copilot, custom) can connect and use any Kali tool.
 
 ## Quick Start
 
 ```bash
-cd ~/Desktop/suvari
-source .venv/bin/activate
+# Default (streamable-http on localhost:8000)
 python suvari_mcp.py
+
+# External access (required for ngrok/Colab)
+python suvari_mcp.py --host 0.0.0.0
+
+# Custom port
+python suvari_mcp.py --host 0.0.0.0 --port 8080
+
+# SSE transport
+python suvari_mcp.py --sse
 ```
 
-The server starts and listens on **stdio** (standard MCP transport). It exposes 6 tools:
+## Transport Formats
 
-| Tool | Description |
-|------|-------------|
-| `scan_target` | Full security scan with browser, CVE intel, JWT analysis |
-| `recon_target` | Quick reconnaissance (ports, tech, headers) |
-| `run_tool` | Execute a specific Kali tool |
-| `list_available_tools` | List all installed security tools |
-| `get_scan_report` | Read a previous scan report |
-| `analyze_ctf` | Analyze a CTF challenge by description |
+| Transport | Endpoint | Clients |
+|-----------|----------|---------|
+| streamable-http (default) | `POST /mcp` | Claude Desktop, Cursor, Copilot |
+| SSE | `GET /sse` + `POST /messages` | Claude Desktop (older), custom |
+| JSON-RPC over HTTP | `POST /mcp` | Any HTTP client (curl, Python) |
 
-## Claude Desktop Integration
+## Connection Examples
 
-Add to your Claude Desktop config file:
+### Python (requests)
+```python
+import requests
+s = requests.Session()
+url = "http://localhost:8000/mcp"
 
-**Linux:** `~/.config/Claude/claude_desktop_config.json`
-**macOS:** `~/Library/Application Support/Claude/claude_desktop_config.json`
+# Initialize
+r = s.post(url, json={"jsonrpc":"2.0","method":"initialize",
+    "params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test","version":"1"}},
+    "id":1})
+sid = r.json().get("sessionId", "")
 
+# List tools
+r = s.post(url, json={"jsonrpc":"2.0","method":"tools/list","id":2},
+    headers={"Mcp-Session-Id": sid} if sid else {})
+print(r.json())
+
+# Call tool
+r = s.post(url, json={"jsonrpc":"2.0","method":"tools/call",
+    "params":{"name":"nmap","arguments":{"target":"scanme.nmap.org","args":"-F"}},
+    "id":3},
+    headers={"Mcp-Session-Id": sid} if sid else {})
+print(r.json()["content"][0]["text"][:500])
+```
+
+### curl
+```bash
+# Initialize
+curl -s -X POST http://localhost:8000/mcp \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"curl","version":"1"}},"id":1}'
+
+# Tools list (with session ID from initialize response)
+curl -s -X POST http://localhost:8000/mcp \
+  -H "Content-Type: application/json" \
+  -H "Mcp-Session-Id: <session_id>" \
+  -d '{"jsonrpc":"2.0","method":"tools/list","id":2}'
+
+# Run nmap
+curl -s -X POST http://localhost:8000/mcp \
+  -H "Content-Type: application/json" \
+  -H "Mcp-Session-Id: <session_id>" \
+  -d '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"nmap","arguments":{"target":"scanme.nmap.org","args":"-F"}},"id":3}'
+```
+
+## Available Tools
+
+All installed Kali tools are available automatically:
+`nmap`, `nuclei`, `gobuster`, `ffuf`, `sqlmap`, `hydra`, `whatweb`, `nikto`, `wpscan`, `masscan`, `curl`, `dig`, `dnsenum`, `dnsrecon`, `enum4linux`, `smbmap`, etc.
+
+Run `python -c "from suvari.mcp_server import _get_runner; r=_get_runner(); print('\n'.join(sorted(r.available_tools())))"` for full list.
+
+## Config for AI Clients
+
+### LM Studio
 ```json
 {
   "mcpServers": {
     "suvari": {
-      "command": "python3",
-      "args": ["/home/kali/Desktop/suvari/suvari_mcp.py"],
-      "description": "Suvari — AI-powered web and server pentester",
-      "timeout": 300,
-      "disabled": false
+      "url": "http://localhost:8000/mcp"
     }
   }
 }
 ```
 
-Restart Claude Desktop. You can now say:
-
-```
-"Scan https://example.com for vulnerabilities"
-"Run nmap on that host"
-"What tools do you have installed?"
-```
-
-## Cursor Integration
-
-1. Copy `suvari-mcp.json` to `.cursor/mcp.json` in your project:
-
-```bash
-cp suvari-mcp.json .cursor/mcp.json
-```
-
-2. Restart Cursor. Suvari tools will appear in the MCP tool list.
-
-## VS Code Copilot Integration
-
-1. Create `.vscode/mcp.json` in your project:
-
+### Claude Desktop
 ```json
 {
-  "servers": {
+  "mcpServers": {
     "suvari": {
-      "type": "stdio",
       "command": "python3",
       "args": ["/path/to/suvari/suvari_mcp.py"]
     }
@@ -76,60 +106,5 @@ cp suvari-mcp.json .cursor/mcp.json
 }
 ```
 
-2. Reload VS Code window. Suvari tools are now available to Copilot.
-
-## Using the Tools
-
-Once connected, your AI client can call the tools:
-
-### scan_target
-
-```
-Purpose: Run full security scan
-Parameters:
-  url (required): Target URL
-  fast (optional): Boolean, fast mode
-  server (optional): Boolean, scan all ports/services
-```
-
-Example from Claude:
-
-```
-User: "Check the security of https://example.com"
-Claude: I'll run a full scan.
-[Calling scan_target(url="https://example.com")]
-Scan complete. Found 3 vulnerabilities:
-- [HIGH] SQL Injection at /search?q=
-- [MEDIUM] Missing security headers
-- [LOW] Server version disclosure
-```
-
-### analyze_ctf
-
-```
-Purpose: Analyze CTF challenges
-Parameters:
-  description (required): Natural language description
-```
-
-Example:
-
-```
-User: "I have a pcap with DNS exfiltration"
-Claude: [Calling analyze_ctf(description="pcap with DNS exfiltration")]
-Check DNS query names in the pcap file. Each subdomain may contain
-base64-encoded data. Use: tshark -r capture.pcap -Y "dns" -T fields
--e dns.qry.name | sort -u | grep -v "\.$"
-```
-
-## Running as HTTP Server (Advanced)
-
-The MCP server can also run over HTTP instead of stdio:
-
-```python
-# Add this to suvari_mcp.py or create a custom wrapper
-from suvari.mcp_server import mcp
-mcp.run(transport="sse", port=8888)
-```
-
-This allows remote AI clients to connect via HTTP.
+### Cursor / VS Code Copilot
+Uses stdio transport. Same as Claude Desktop config above.
