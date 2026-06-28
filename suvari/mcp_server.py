@@ -222,7 +222,43 @@ def run_server(host: str = "0.0.0.0", port: int = 8000):
 
     # Log POST /mcp requests and responses
     import logging
+    import json as _json
     log = logging.getLogger("suvari.mcp")
+
+    # ── Simple REST API (no MCP complexity) ──────────────────────────
+    async def api_list_tools(request: Request):
+        """GET /api/tools — list all available tools."""
+        runner = _get_runner()
+        tools = runner.available_tools()
+        return JSONResponse({"tools": [{"name": n, "description": d} for n, d in sorted(tools.items())]})
+
+    async def api_run_tool(request: Request):
+        """POST /api/run — run a tool.
+        Body: {"tool": "nmap", "target": "scanme.nmap.org", "args": "-F"}
+        """
+        try:
+            data = await request.json()
+        except Exception:
+            return JSONResponse({"error": "invalid JSON"}, status_code=400)
+        tool = data.get("tool", "")
+        target = data.get("target", "")
+        args = data.get("args", "")
+        if not tool:
+            return JSONResponse({"error": "tool required"}, status_code=400)
+        # Run via existing MCP tool logic
+        fn = _make_tool_fn(tool)
+        result = fn(target=target, args=args)
+        return JSONResponse({"tool": tool, "target": target, "output": result[:5000]})
+
+    async def api_health(request: Request):
+        return JSONResponse({"status": "ok", "tools": len(all_tools), "version": "1.0"})
+
+    # Add routes
+    routes += [
+        Route("/api/tools", endpoint=api_list_tools, methods=["GET"]),
+        Route("/api/run", endpoint=api_run_tool, methods=["POST"]),
+        Route("/api/health", endpoint=api_health, methods=["GET"]),
+    ]
 
     @app.middleware("http")
     async def log_mcp(request, call_next):
