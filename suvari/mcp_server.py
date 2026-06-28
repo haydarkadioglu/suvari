@@ -188,13 +188,16 @@ def run_server(host: str = "0.0.0.0", port: int = 8000):
     logging.getLogger("mcp").setLevel(logging.INFO)
 
     # Print tool name when called
-    mcp._orig_log = logging.getLogger("mcp").info
+    mcp._orig_log = logging.getLogger("mcp.server.server").info
     def log_hook(msg, *args, **kwargs):
-        if msg.startswith("handle_"):
-            tool_name = msg.replace("handle_", "").split("[")[0].strip()
-            print(f"  [MCP] tool: {tool_name}")
+        # Catch CallToolRequest which contains the tool name
+        if "CallTool" in str(msg) or "handle_" in str(msg):
+            import re
+            match = re.search(r"CallToolRequest\('([^']+)'", str(args))
+            if match:
+                print(f"  [MCP] tool: {match.group(1)}")
         mcp._orig_log(msg, *args, **kwargs)
-    logging.getLogger("mcp").info = log_hook
+    logging.getLogger("mcp.server.server").info = log_hook
 
     mcp.settings.host = host
     mcp.settings.port = port
