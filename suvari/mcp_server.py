@@ -183,68 +183,11 @@ logger.info(f"MCP ready: {len(all_tools)} tools registered")
 # ── Multi-transport server ────────────────────────────────────────────────
 
 def run_server(host: str = "0.0.0.0", port: int = 8000):
-    """Run MCP server with streamable-http + REST API."""
-    import uvicorn
-    from starlette.applications import Starlette
-    from starlette.routing import Route
-    from starlette.middleware import Middleware
-    from starlette.middleware.cors import CORSMiddleware
-    from starlette.responses import JSONResponse
-    from starlette.requests import Request
-
-    # ── REST API (standalone, no MCP dependency) ──
-    async def health(request: Request):
-        from .tools.runner import ToolRunner
-        r = ToolRunner()
-        return JSONResponse({"status": "ok", "tools": len(r.available_tools())})
-
-    async def api_tools(request: Request):
-        from .tools.runner import ToolRunner
-        r = ToolRunner()
-        tools = r.available_tools()
-        return JSONResponse({"tools": [{"name": n, "desc": d} for n, d in sorted(tools.items())]})
-
-    async def api_run(request: Request):
-        from .tools.runner import ToolRunner
-        try:
-            data = await request.json()
-        except Exception:
-            return JSONResponse({"error": "invalid JSON"}, status_code=400)
-        tool = data.get("tool", "")
-        target = data.get("target", "")
-        args = data.get("args", "")
-        if not tool:
-            return JSONResponse({"error": "tool required"}, status_code=400)
-        fn = _make_tool_fn(tool)
-        result = fn(target=target, args=args)
-        return JSONResponse({"tool": tool, "output": result[:5000]})
-
-    app = Starlette(
-        routes=[
-            Route("/", endpoint=health),
-            Route("/health", endpoint=health),
-            Route("/api/tools", endpoint=api_tools, methods=["GET"]),
-            Route("/api/run", endpoint=api_run, methods=["POST"]),
-        ],
-        middleware=[
-            Middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"]),
-        ],
-    )
-
-    print(f"Suvari REST API on {host}:{port}")
-    print(f"  GET  /api/tools - list tools")
-    print(f"  POST /api/run   - run tool")
-    print(f"  MCP server on port {port+1} (streamable-http)")
-
-    # Start REST API
-    import threading
-    t = threading.Thread(target=lambda: uvicorn.run(app, host=host, port=port, log_level="warning"), daemon=True)
-    t.start()
-
-    # Start MCP server on next port
+    """Run MCP streamable-http server."""
     mcp.settings.host = host
-    mcp.settings.port = port + 1
-    print(f"  MCP: POST http://{host}:{port+1}/mcp")
+    mcp.settings.port = port
+    print(f"Suvari MCP: streamable-http on {host}:{port}")
+    print(f"  POST /mcp - JSON-RPC")
     mcp.run(transport="streamable-http")
 
 
