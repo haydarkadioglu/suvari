@@ -183,7 +183,19 @@ logger.info(f"MCP ready: {len(all_tools)} tools registered")
 # ── Multi-transport server ────────────────────────────────────────────────
 
 def run_server(host: str = "0.0.0.0", port: int = 8000):
-    """Run MCP streamable-http server."""
+    """Run MCP streamable-http server with request logging."""
+    import logging
+    logging.getLogger("mcp").setLevel(logging.INFO)
+
+    # Print tool name when called
+    mcp._orig_log = logging.getLogger("mcp").info
+    def log_hook(msg, *args, **kwargs):
+        if msg.startswith("handle_"):
+            tool_name = msg.replace("handle_", "").split("[")[0].strip()
+            print(f"  [MCP] tool: {tool_name}")
+        mcp._orig_log(msg, *args, **kwargs)
+    logging.getLogger("mcp").info = log_hook
+
     mcp.settings.host = host
     mcp.settings.port = port
     print(f"Suvari MCP: streamable-http on {host}:{port}")
