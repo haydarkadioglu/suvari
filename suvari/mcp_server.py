@@ -241,19 +241,14 @@ def run_server(host: str = "0.0.0.0", port: int = 8000):
         async def dispatch(self, request, call_next):
             from starlette.responses import Response
             if request.method == "POST" and request.url.path == "/mcp":
-                # Forward to streamable-http ASGI app
+                # Forward to streamable-http ASGI app as-is
                 scope = request.scope
-                # Set path to root since streamable_app expects /
-                scope["path"] = "/"
-                scope["root_path"] = ""
-                # Create a send wrapper to capture response
                 response_body = []
-                send_wrapper = None
+                send_status = {}
 
                 async def send(message):
                     if message["type"] == "http.response.start":
-                        nonlocal send_wrapper
-                        send_wrapper = message
+                        send_status["status"] = message.get("status", 200)
                     elif message["type"] == "http.response.body":
                         response_body.append(message.get("body", b""))
 
@@ -261,7 +256,7 @@ def run_server(host: str = "0.0.0.0", port: int = 8000):
                 body = b"".join(response_body)
                 log.info(f"MCP response: {body[:300]}")
                 return Response(content=body, media_type="application/json",
-                              status_code=send_wrapper.get("status", 200) if send_wrapper else 200)
+                              status_code=send_status.get("status", 200))
             if request.method == "GET" and request.url.path == "/mcp":
                 return Response("use POST", status_code=405)
             return await call_next(request)
