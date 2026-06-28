@@ -220,7 +220,24 @@ def run_server(host: str = "0.0.0.0", port: int = 8000):
         ],
     )
 
-    print(f"Suvari MCP listening on {host}:{port}")
+    # Log POST /mcp requests and responses
+    import logging
+    log = logging.getLogger("suvari.mcp")
+
+    @app.middleware("http")
+    async def log_mcp(request, call_next):
+        if request.method == "POST" and request.url.path == "/mcp":
+            body = await request.body()
+            log.info(f"POST /mcp from {request.client.host}: {body[:500]}")
+        response = await call_next(request)
+        if request.method == "POST" and request.url.path == "/mcp":
+            resp_body = b"".join([chunk async for chunk in response.body_iterator])
+            log.info(f"Response ({response.status_code}): {resp_body[:500]}")
+            from starlette.responses import Response
+            return Response(content=resp_body, status_code=response.status_code, media_type="application/json", headers=dict(response.headers))
+        return response
+
+    print(f"Suvari MCP on {host}:{port}")
     print(f"  POST /mcp     — streamable-http (JSON-RPC)")
     print(f"  GET  /sse     — SSE transport")
     print(f"  GET  /health  — health check")
