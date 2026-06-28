@@ -16,6 +16,7 @@ logging.getLogger("mcp").setLevel(logging.WARNING)
 mcp = FastMCP("Suvari — AI Pentester",
     instructions="80+ Kali Linux security tools as individual MCP tools. Use run_tool for any tool, or call the specific tool directly.",
     transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False),
+    debug=True,
 )
 
 # Bind to 0.0.0.0 for external access
