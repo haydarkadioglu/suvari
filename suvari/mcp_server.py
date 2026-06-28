@@ -132,6 +132,10 @@ _KNOWN_CONFIGS = {
     "dnsrecon":   (["-d", "{host}"]),
     "fierce":     (["--domain", "{host}"]),
     "dnsenum":    (["{host}"]),
+    "ftp":        (["{host}"]),
+    "wget":       (["{target}"]),
+    "nc":         (["{host}"]),
+    "telnet":     (["{host}"]),
 }
 
 def _make_tool_fn(tool_name: str):
