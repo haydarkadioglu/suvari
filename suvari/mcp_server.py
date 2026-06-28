@@ -18,6 +18,11 @@ mcp = FastMCP("Suvari — AI Pentester",
     transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False),
 )
 
+# Bind to 0.0.0.0 for external access
+import os
+_MCP_HOST = os.environ.get("MCP_HOST", "0.0.0.0")
+_MCP_PORT = int(os.environ.get("MCP_PORT", "8000"))
+
 _runner = None
 def _get_runner():
     global _runner
