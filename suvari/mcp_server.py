@@ -209,9 +209,10 @@ def run_server(host: str = "0.0.0.0", port: int = 8000):
     routes = [
         Route("/", endpoint=health),
         Route("/health", endpoint=health),
-        Mount("/sse", app=sse_app),
-        Mount("/mcp", app=handle_mcp),
-        Mount("/messages", app=sse_app),  # SSE message endpoint
+        # Streamable HTTP at /mcp (no trailing slash redirect)
+        Route("/mcp", endpoint=handle_mcp, methods=["GET", "POST", "OPTIONS"]),
+        # SSE transport at /sse (mount at root so internal routes work)
+        Mount("/", app=sse_app),
     ]
 
     app = Starlette(
