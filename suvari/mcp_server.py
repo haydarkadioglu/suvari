@@ -239,9 +239,9 @@ def run_server(host: str = "0.0.0.0", port: int = 8000):
 
     class MCPRouterMiddleware(BaseHTTPMiddleware):
         async def dispatch(self, request, call_next):
+            from starlette.responses import Response
             if request.method == "POST" and request.url.path == "/mcp":
                 # Forward to streamable-http ASGI app
-                from starlette.responses import Response
                 scope = request.scope
                 # Set path to root since streamable_app expects /
                 scope["path"] = "/"
