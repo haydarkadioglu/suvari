@@ -269,11 +269,14 @@ def run_server(host: str = "0.0.0.0", port: int = 8000):
     app.add_middleware(MCPRouterMiddleware)
 
     print(f"Suvari MCP on {host}:{port}")
-    print(f"  /mcp       - POST streamable-http")
-    print(f"  /sse       - GET SSE transport")
-    print(f"  /api/tools - GET REST")
-    print(f"  /api/run   - POST REST")
-    print(f"  {len(all_tools)} tools")
+    print(f"  POST /mcp       - MCP streamable-http")
+    print(f"  GET  /mcp       - 405 (use POST)")
+    print(f"  GET  /sse       - MCP SSE transport")
+    print(f"  POST /messages  - MCP SSE messages")
+    print(f"  GET  /api/tools - list tools (no MCP)")
+    print(f"  POST /api/run   - run tool (no MCP)")
+    print(f"  GET  /health    - server status")
+    print(f"  75 tools loaded")
     uvicorn.run(app, host=host, port=port, log_level="info")
 
 
