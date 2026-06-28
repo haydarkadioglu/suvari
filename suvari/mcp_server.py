@@ -242,19 +242,23 @@ def run_server(host: str = "0.0.0.0", port: int = 8000):
     from starlette.routing import Mount as RMount
     app.router.routes.append(RMount("/mcp", app=mcp_handler))
 
-    # Log POST /mcp
-    @app.middleware("http")
-    async def log_mcp(request, call_next):
-        if request.method == "POST" and request.url.path == "/mcp":
-            body = await request.body()
-            log.info(f"POST /mcp from {request.client.host}: {body[:300]}")
-        response = await call_next(request)
-        if request.method == "POST" and request.url.path == "/mcp":
-            resp_body = b"".join([chunk async for chunk in response.body_iterator])
-            log.info(f"Response ({response.status_code}): {resp_body[:300]}")
-            return Response(content=resp_body, status_code=response.status_code,
-                          media_type="application/json", headers=dict(response.headers))
-        return response
+    # Log POST /mcp via Starlette middleware class
+    from starlette.middleware.base import BaseHTTPMiddleware
+
+    class MCPLogMiddleware(BaseHTTPMiddleware):
+        async def dispatch(self, request, call_next):
+            if request.method == "POST" and request.url.path == "/mcp":
+                body = await request.body()
+                log.info(f"POST /mcp from {request.client.host}: {body[:300]}")
+            response = await call_next(request)
+            if request.method == "POST" and request.url.path == "/mcp":
+                resp_body = b"".join([chunk async for chunk in response.body_iterator])
+                log.info(f"Response ({response.status_code}): {resp_body[:300]}")
+                return Response(content=resp_body, status_code=response.status_code,
+                              media_type="application/json", headers=dict(response.headers))
+            return response
+
+    app.add_middleware(MCPLogMiddleware)
 
     print(f"Suvari MCP on {host}:{port}")
     print(f"  /mcp       - POST streamable-http")
