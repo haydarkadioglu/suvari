@@ -6,11 +6,11 @@ Chat, agents, tools, findings bus, file management all in one place.
 from typing import Optional
 from pathlib import Path
 from datetime import datetime
-from .llm import LLMClient
-from .bus import FindingsBus
-from .workspace import Workspace
-from .tools.runner import ToolRunner
-from .config import load_config
+from suvari.llm import LLMClient
+from suvari.bus import FindingsBus
+from suvari.workspace import Workspace
+from suvari.tools.runner import ToolRunner
+from suvari.config import load_config
 import re, json, shlex, subprocess as sp
 
 
