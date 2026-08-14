@@ -270,27 +270,370 @@ class PromptLoader:
         self.fast = fast
 
 class Planner:
-    """P-E-R planner - decides next action based on phase and results."""
+    """P-E-R planner - AI-powered dynamic decision making for scan phases."""
+    
     def __init__(self, llm, tools, prompts):
         self.llm = llm
         self.tools = tools
         self.prompts = prompts
         self._knowledge = {}
+        self._phase_history = []
+        self._adaptive_strategy = None
 
     def decide(self, phase: str, completed: list, last_results: dict) -> dict:
-        """Decide next action. Returns plan dict with next_action + reasoning."""
-        return {"next_action": phase, "reasoning": f"Executing {phase} phase"}
+        """AI-powered decision making for next action based on context and findings."""
+        
+        # Build rich context for AI decision
+        context = self._build_decision_context(phase, completed, last_results)
+        
+        try:
+            # Use LLM to decide optimal next step
+            system_prompt = self._get_planner_prompt()
+            response = self.llm.chat(
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": context}
+                ],
+                temperature=0.2,
+                max_tokens=512
+            )
+            
+            # Parse AI decision
+            plan = self._parse_ai_plan(response, phase)
+            plan["ai_decided"] = True
+            
+        except Exception as e:
+            # Fallback to deterministic logic
+            plan = self._fallback_decision(phase, completed, last_results)
+            plan["ai_decided"] = False
+            plan["fallback_reason"] = str(e)
+        
+        # Store decision history for learning
+        self._phase_history.append({
+            "phase": phase,
+            "plan": plan,
+            "context_summary": self._summarize_context(last_results)
+        })
+        
+        return plan
+
+    def _build_decision_context(self, phase: str, completed: list, last_results: dict) -> str:
+        """Build comprehensive context for AI decision making."""
+        
+        # Extract key findings from previous phases
+        recon_summary = ""
+        if "recon_results" in last_results:
+            recon = last_results["recon_results"]
+            techs = recon.get("whatweb", "")[:300]
+            ports = recon.get("nmap", "")[:200]
+            recon_summary = f"Recon found: Tech={techs}, Ports={ports}"
+        
+        scan_summary = ""
+        if "scan_results" in last_results:
+            scan = last_results["scan_results"]
+            vulns = scan.get("vulnerabilities", [])[:3]
+            if vulns:
+                scan_summary = f"Scan found {len(vulns)} vulns: " + ", ".join([v.get("type", "") for v in vulns])
+        
+        # Available tools
+        avail_tools = list(self.tools.available_tools().keys())[:15]
+        
+        context = f"""Current Phase: {phase}
+Completed Phases: {', '.join(completed)}
+{recon_summary}
+{scan_summary}
+Available Tools: {', '.join(avail_tools)}
+Target: {last_results.get('target_url', 'unknown')}
+
+Based on this context, decide the optimal next action."""
+        
+        return context
+
+    def _get_planner_prompt(self) -> str:
+        """System prompt for AI planner."""
+        return """You are an intelligent penetration testing planner. Your job is to decide the optimal next action based on current findings.
+
+Given the scan context, you should:
+1. Analyze what has been discovered so far
+2. Identify gaps in coverage
+3. Select the most appropriate tool/action
+4. Provide clear reasoning
+
+Respond in JSON format:
+{
+  "next_action": "tool_name or phase_name",
+  "reasoning": "Why this action is optimal",
+  "priority": "high/medium/low",
+  "expected_outcome": "What we expect to find"
+}"""
+
+    def _parse_ai_plan(self, response: str, default_phase: str) -> dict:
+        """Parse AI response into actionable plan."""
+        import json
+        import re
+        
+        # Try to extract JSON from response
+        json_match = re.search(r'\{[^}]*\}', response, re.DOTALL)
+        if json_match:
+            try:
+                plan = json.loads(json_match.group())
+                return {
+                    "next_action": plan.get("next_action", default_phase),
+                    "reasoning": plan.get("reasoning", "AI-selected action"),
+                    "priority": plan.get("priority", "medium"),
+                    "expected_outcome": plan.get("expected_outcome", ""),
+                }
+            except json.JSONDecodeError:
+                pass
+        
+        # Fallback parsing
+        return {
+            "next_action": default_phase,
+            "reasoning": "Default action (JSON parse failed)",
+            "priority": "medium",
+            "expected_outcome": ""
+        }
+
+    def _fallback_decision(self, phase: str, completed: list, last_results: dict) -> dict:
+        """Deterministic fallback when AI is unavailable."""
+        
+        # Simple rule-based decisions
+        if phase == "recon":
+            return {
+                "next_action": "recon",
+                "reasoning": "Initial reconnaissance required",
+                "priority": "high",
+                "expected_outcome": "Target profiling"
+            }
+        elif phase == "scan":
+            # Check if we have enough recon data
+            if "recon_results" not in last_results:
+                return {
+                    "next_action": "recon",
+                    "reasoning": "Need more recon before scanning",
+                    "priority": "high",
+                    "expected_outcome": "Complete recon first"
+                }
+            return {
+                "next_action": "scan",
+                "reasoning": "Proceeding with vulnerability scan",
+                "priority": "high",
+                "expected_outcome": "Vulnerability detection"
+            }
+        elif phase == "analyze":
+            return {
+                "next_action": "analyze",
+                "reasoning": "Analyzing scan results with AI",
+                "priority": "medium",
+                "expected_outcome": "Prioritized findings"
+            }
+        elif phase == "exploit":
+            return {
+                "next_action": "exploit",
+                "reasoning": "Attempting exploitation of high-severity findings",
+                "priority": "medium",
+                "expected_outcome": "PoC exploits"
+            }
+        
+        return {
+            "next_action": phase,
+            "reasoning": "Default phase execution",
+            "priority": "low",
+            "expected_outcome": ""
+        }
 
     def add_knowledge(self, key: str, value):
-        """Store knowledge for future planning."""
+        """Store knowledge for future planning - now with AI-enhanced learning."""
         self._knowledge[key] = value
+        
+        # If we have enough knowledge, update adaptive strategy
+        if len(self._knowledge) > 3:
+            self._update_adaptive_strategy()
+
+    def _update_adaptive_strategy(self):
+        """Use AI to update scanning strategy based on accumulated knowledge."""
+        try:
+            knowledge_text = "\n".join([f"- {k}: {v}" for k, v in self._knowledge.items()])
+            prompt = f"""Based on these findings, suggest an adaptive strategy adjustment:
+{knowledge_text}
+
+Respond with one strategic adjustment in JSON: {{"adjustment": "...", "reason": "..."}}"""
+            
+            response = self.llm.chat(
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.1,
+                max_tokens=256
+            )
+            
+            # Parse and store strategy
+            import json, re
+            match = re.search(r'\{[^}]*\}', response)
+            if match:
+                self._adaptive_strategy = json.loads(match.group())
+                
+        except Exception:
+            pass  # Keep existing strategy
+
+    def get_adaptive_strategy(self) -> dict:
+        """Get current adaptive strategy."""
+        return self._adaptive_strategy or {"adjustment": "Standard scanning", "reason": "No adjustments yet"}
+
+    def _summarize_context(self, results: dict) -> str:
+        """Create a brief summary of current context for history."""
+        parts = []
+        if "recon_results" in results:
+            parts.append("recon_done")
+        if "scan_results" in results:
+            vulns = results["scan_results"].get("vulnerabilities", [])
+            if isinstance(vulns, list):
+                parts.append(f"{len(vulns)}_vulns")
+        return "_".join(parts) or "no_data"
+
 
 class Reflector:
-    """P-E-R reflector - analyzes tool output for improvements."""
+    """P-E-R reflector - AI-powered analysis of tool output for continuous improvement."""
+    
     def __init__(self, llm):
         self.llm = llm
         self._failures = []
+        self._success_patterns = []
+        self._reflection_count = 0
 
-    def analyze(self, last_action: str = "", tool: str = "", output: str = "", phase: str = "", target_url: str = "") -> dict:
-        """Analyze output and return reflection."""
-        return {"success": True, "findings": [], "improvements": []}
+    def analyze(self, last_action: str = "", tool: str = "", output: str = "", 
+                phase: str = "", target_url: str = "") -> dict:
+        """AI-powered reflection on tool output to extract findings and improvements."""
+        
+        self._reflection_count += 1
+        
+        try:
+            # Use AI to analyze output
+            reflection = self._ai_reflect(last_action, tool, output, phase, target_url)
+            
+            # Store successful patterns
+            if reflection.get("success"):
+                self._success_patterns.append({
+                    "tool": tool,
+                    "phase": phase,
+                    "findings_count": len(reflection.get("findings", []))
+                })
+            
+            # Store failures for learning
+            if not reflection.get("success"):
+                self._failures.append({
+                    "tool": tool,
+                    "phase": phase,
+                    "output_snippet": output[:200],
+                    "timestamp": self._reflection_count
+                })
+            
+            # Mark as AI-powered only if no error
+            if "ai_error" not in reflection:
+                reflection["ai_powered"] = True
+            else:
+                reflection["ai_powered"] = False
+            
+            return reflection
+            
+        except Exception as e:
+            # Fallback to basic reflection
+            basic = self._basic_reflect(last_action, tool, output, phase)
+            basic["exception"] = str(e)
+            return basic
+
+    def _ai_reflect(self, last_action: str, tool: str, output: str, 
+                    phase: str, target_url: str) -> dict:
+        """Use LLM to analyze tool output and extract insights."""
+        
+        prompt = f"""Analyze this security tool output and provide structured feedback:
+
+Tool: {tool}
+Phase: {phase}
+Target: {target_url}
+Output (first 1500 chars):
+{output[:1500]}
+
+Extract:
+1. Was the tool successful? (yes/no)
+2. What vulnerabilities or findings were discovered?
+3. What improvements would you suggest for next iteration?
+4. Should we run additional follow-up tools? Which ones?
+
+Respond in JSON:
+{{
+  "success": true/false,
+  "findings": [{{"type": "...", "severity": "...", "detail": "..."}}],
+  "improvements": ["suggestion1", "suggestion2"],
+  "follow_up_tools": ["tool1", "tool2"],
+  "confidence": 0.0-1.0
+}}"""
+        
+        try:
+            response = self.llm.chat(
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.1,
+                max_tokens=768
+            )
+            
+            # Parse JSON response
+            import json, re
+            json_match = re.search(r'\{[^}]*\}', response, re.DOTALL)
+            if json_match:
+                result = json.loads(json_match.group())
+                # Ensure required fields exist
+                result.setdefault("success", True)
+                result.setdefault("findings", [])
+                result.setdefault("improvements", [])
+                result.setdefault("follow_up_tools", [])
+                result.setdefault("confidence", 0.5)
+                return result
+            
+        except Exception:
+            pass
+        
+        # Return safe default
+        return {
+            "success": True,
+            "findings": [],
+            "improvements": [],
+            "follow_up_tools": [],
+            "confidence": 0.5,
+            "ai_error": "JSON parse failed"
+        }
+
+    def _basic_reflect(self, last_action: str, tool: str, output: str, phase: str) -> dict:
+        """Rule-based reflection when AI is unavailable."""
+        
+        # Basic success detection
+        success_indicators = ["found", "detected", "ok", "success", "completed"]
+        failure_indicators = ["error", "failed", "timeout", "unreachable", "denied"]
+        
+        output_lower = output.lower()
+        success_score = sum(1 for ind in success_indicators if ind in output_lower)
+        failure_score = sum(1 for ind in failure_indicators if ind in output_lower)
+        
+        success = success_score > failure_score
+        
+        # Extract basic findings
+        findings = []
+        if "critical" in output_lower:
+            findings.append({"type": "critical_issue", "severity": "CRITICAL", "detail": "Critical keyword detected"})
+        if "vulnerability" in output_lower:
+            findings.append({"type": "vulnerability", "severity": "HIGH", "detail": "Vulnerability keyword detected"})
+        
+        return {
+            "success": success,
+            "findings": findings,
+            "improvements": [],
+            "follow_up_tools": [],
+            "ai_powered": False
+        }
+
+    def get_learning_summary(self) -> dict:
+        """Get summary of learned patterns from reflections."""
+        return {
+            "total_reflections": self._reflection_count,
+            "successful_runs": len(self._success_patterns),
+            "failed_runs": len(self._failures),
+            "success_rate": len(self._success_patterns) / max(1, self._reflection_count),
+            "common_failures": self._failures[-5:]  # Last 5 failures
+        }

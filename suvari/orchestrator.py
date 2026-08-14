@@ -41,7 +41,11 @@ class SuvariOrchestrator:
                  verbose: bool = False, scan_mode: ScanMode = ScanMode.GUIDED,
                  parallel: int = 3, chain_mode: bool = False,
                  login_creds: Optional[str] = None, browser_type: str = "chromium",
-                 source_dir: Optional[Path] = None, server_scan: bool = False):
+                 source_dir: Optional[Path] = None, server_scan: bool = False,
+                 proxy_url: Optional[str] = None, custom_headers: Optional[dict] = None,
+                 custom_cookies: Optional[dict] = None, rate_limit: Optional[int] = None,
+                 timeout: int = 300, scope_file: Optional[str] = None,
+                 user_agent: Optional[str] = None, report_format: str = "markdown"):
         self.target_url = target_url
         self.ws = workspace
         self.recon_only = recon_only
@@ -54,12 +58,27 @@ class SuvariOrchestrator:
         self.browser_type = browser_type
         self.source_dir = source_dir
         self.server_scan = server_scan
+        self.proxy_url = proxy_url
+        self.custom_headers = custom_headers or {}
+        self.custom_cookies = custom_cookies or {}
+        self.rate_limit = rate_limit
+        self.timeout = timeout
+        self.scope_file = scope_file
+        self.user_agent = user_agent
+        self.report_format = report_format
 
         self.state = PipelineState(workspace.path)
         self.logger = ScanLogger(workspace.path)
         self.logger.info("suvari", f"Scan started: {target_url} (provider={provider}, fast={fast})")
         self.llm = LLMClient(provider=provider, model=model)
-        self.tools = ToolRunner(verbose=verbose)
+        self.tools = ToolRunner(
+            verbose=verbose,
+            proxy_url=proxy_url,
+            custom_headers=self.custom_headers,
+            custom_cookies=self.custom_cookies,
+            rate_limit=rate_limit,
+            user_agent=user_agent,
+        )
         self.prompts = PromptLoader(target_url, fast)
 
         self.planner = Planner(self.llm, self.tools, self.prompts)
@@ -69,12 +88,17 @@ class SuvariOrchestrator:
         self.scanner_agent = ScannerAgent("scanner", self.llm, self.ws, self.tools, verbose)
         self.analyzer_agent = AnalyzerAgent("analyzer", self.llm, self.ws, self.tools, verbose)
         self.exploiter_agent = ExploiterAgent("exploiter", self.llm, self.ws, self.tools, verbose)
-        self.reporter = ReportGenerator(self.ws, self.target_url)
+        self.reporter = ReportGenerator(self.ws, self.target_url, report_format)
 
         self.context = {"target_url": target_url, "fast": fast, "source_dir": source_dir,
                         "mode": scan_mode, "server_scan": server_scan, "parallel": parallel,
                         "login_creds": login_creds, "browser_type": browser_type,
-                        "recon_done": []}
+                        "recon_done": [], "proxy_url": proxy_url,
+                        "custom_headers": self.custom_headers,
+                        "custom_cookies": self.custom_cookies,
+                        "rate_limit": rate_limit, "timeout": timeout,
+                        "scope_file": scope_file, "user_agent": user_agent,
+                        "report_format": report_format}
         self.bus = FindingsBus()
 
         # Agents subscribe to relevant findings
