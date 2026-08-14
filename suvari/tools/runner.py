@@ -28,10 +28,27 @@ def clean_ansi(text: str) -> str:
 class ToolRunner:
     """Execute security tools with result caching (max 100 per session)."""
 
-    def __init__(self, verbose: bool = False):
+    def __init__(self, verbose: bool = False, proxy_url: Optional[str] = None,
+                 custom_headers: Optional[dict] = None, custom_cookies: Optional[dict] = None,
+                 rate_limit: Optional[int] = None, user_agent: Optional[str] = None):
         self.verbose = verbose
         self._cache = {}  # Instance-level cache, not shared across sessions
         self._MAX_CACHE = 100
+        self.proxy_url = proxy_url
+        self.custom_headers = custom_headers or {}
+        self.custom_cookies = custom_cookies or {}
+        self.rate_limit = rate_limit
+        self.user_agent = user_agent
+        self._env = None
+        self._setup_proxy_env()
+    
+    def _setup_proxy_env(self):
+        """Setup proxy environment variables if proxy is configured."""
+        if self.proxy_url:
+            import os
+            self._env = os.environ.copy()
+            self._env['HTTP_PROXY'] = self.proxy_url
+            self._env['HTTPS_PROXY'] = self.proxy_url
 
     def run(self, cmd: list, timeout: int = 120, workdir: Optional[Path] = None,
             max_output_len: int = 50_000) -> str:
@@ -58,6 +75,7 @@ class ToolRunner:
                 text=True,
                 timeout=timeout,
                 cwd=workdir,
+                env=self._env,  # Use proxy environment if configured
             )
             output = clean_ansi(result.stdout + result.stderr)
             output = self._smart_truncate(output, max_output_len) if len(output) > max_output_len else output
@@ -72,6 +90,66 @@ class ToolRunner:
         except Exception as e:
             self._cache[cache_key] = f"(error: {e})"
             return self._cache[cache_key]
+    
+    def build_tool_args(self, base_cmd: list, target: str, extra_args: Optional[list] = None) -> list:
+        """Build command with proxy, headers, cookies, rate limit, and user-agent.
+        
+        Supports common tools: curl, nuclei, httpx, gobuster, ffuf, etc.
+        """
+        cmd = base_cmd.copy()
+        
+        # Add custom headers
+        for key, value in self.custom_headers.items():
+            if 'curl' in cmd[0] or 'httpx' in cmd[0]:
+                cmd.extend(['-H', f'{key}: {value}'])
+            elif 'nuclei' in cmd[0]:
+                cmd.extend(['-header', f'{key}: {value}'])
+            elif 'gobuster' in cmd[0] or 'ffuf' in cmd[0]:
+                cmd.extend(['-H', f'{key}: {value}'])
+        
+        # Add custom cookies
+        if self.custom_cookies:
+            cookie_str = '; '.join([f'{k}={v}' for k, v in self.custom_cookies.items()])
+            if 'curl' in cmd[0]:
+                cmd.extend(['-b', cookie_str])
+            elif 'httpx' in cmd[0]:
+                cmd.extend(['-cookie', cookie_str])
+            elif 'nuclei' in cmd[0]:
+                cmd.extend(['-cookie', f'{cookie_str}'])
+            elif 'gobuster' in cmd[0] or 'ffuf' in cmd[0]:
+                cmd.extend(['-b', cookie_str])
+        
+        # Add custom user-agent
+        if self.user_agent:
+            if 'curl' in cmd[0]:
+                cmd.extend(['-A', self.user_agent])
+            elif 'httpx' in cmd[0]:
+                cmd.extend(['-user-agent', self.user_agent])
+            elif 'nuclei' in cmd[0]:
+                cmd.extend(['-user-agent', self.user_agent])
+            elif 'gobuster' in cmd[0] or 'ffuf' in cmd[0]:
+                cmd.extend(['-a', self.user_agent])
+        
+        # Add rate limiting (tool-specific)
+        if self.rate_limit:
+            if 'nuclei' in cmd[0]:
+                cmd.extend(['-rate-limit', str(self.rate_limit)])
+            elif 'httpx' in cmd[0]:
+                cmd.extend(['-rate-limit', str(self.rate_limit)])
+            elif 'gobuster' in cmd[0]:
+                cmd.extend(['-d', str(int(1000 / self.rate_limit))])  # Delay in ms
+            elif 'ffuf' in cmd[0]:
+                cmd.extend(['-t', '1'])  # Threads
+        
+        # Add target
+        if target and target not in cmd:
+            cmd.append(target)
+        
+        # Add extra arguments
+        if extra_args:
+            cmd.extend(extra_args)
+        
+        return cmd
 
     def _smart_truncate(self, text: str, max_len: int) -> str:
         """Truncate text but preserve critical lines (CVEs, vulnerabilities, etc.)."""

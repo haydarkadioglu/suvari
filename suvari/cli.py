@@ -64,8 +64,24 @@ def scan(
     browser: str = typer.Option("auto", "--browser", "-b", help="Browser engine: auto / chromium / firefox / webkit"),
     server: bool = typer.Option(False, "--server", "-s", help="Full server scan (SSH, FTP, SMB, DB, all ports)"),
     source: Optional[Path] = typer.Option(None, "--source", "-r", help="Source code directory (white-box mode)"),
+    proxy: Optional[str] = typer.Option(None, "--proxy", help="Proxy URL (e.g. http://127.0.0.1:8080 for Burp/ZAP)"),
+    headers: Optional[str] = typer.Option(None, "--headers", "-H", help="Custom headers (JSON format or 'Key: Value' pairs)"),
+    cookies: Optional[str] = typer.Option(None, "--cookies", "-c", help="Custom cookies (JSON format or 'name=value' pairs)"),
+    rate_limit: Optional[int] = typer.Option(None, "--rate-limit", help="Max requests per second (stealth mode)"),
+    timeout: int = typer.Option(300, "--timeout", "-t", help="Tool timeout in seconds (default: 300)"),
+    report_format: str = typer.Option("markdown", "--format", help="Report format: markdown / json / html / xml"),
+    scope: Optional[str] = typer.Option(None, "--scope", help="Scope file (out-of-scope domains/paths to exclude)"),
+    user_agent: Optional[str] = typer.Option(None, "--user-agent", "-u", help="Custom User-Agent string"),
 ):
-    """Scan target URL — recon → vulnerability scan → analysis → report"""
+    """Scan target URL — recon → vulnerability scan → analysis → exploit → report
+    
+    Examples:
+      suvari scan https://example.com
+      suvari scan https://target.com --proxy http://127.0.0.1:8080
+      suvari scan https://app.com -H '{"Authorization": "Bearer token"}' -c '{"session": "abc123"}'
+      suvari scan https://site.com --rate-limit 5 --user-agent "Mozilla/5.0"
+      suvari scan https://target.com --format json --scope scope.txt
+    """
     banner()
     provider, model = _resolve_provider(provider, model)
     scan_mode = ScanMode.from_str(mode)
@@ -77,7 +93,25 @@ def scan(
         console.print(f"[bold][DIR] Source:[/bold] {source} (white-box mode)")
     if server:
         console.print(f"[bold][SRV]  Mode:[/bold] Server scan (all ports + services)")
-    console.print(f"[bold][DIR] Output:[/bold] {ws.path}\n")
+    if proxy:
+        console.print(f"[bold][PROXY] Proxy:[/bold] {proxy}")
+    if headers:
+        console.print(f"[bold][HDR] Headers:[/bold] Custom headers enabled")
+    if cookies:
+        console.print(f"[bold][CKI] Cookies:[/bold] Custom cookies enabled")
+    if rate_limit:
+        console.print(f"[bold][RATE] Rate Limit:[/bold] {rate_limit} req/s")
+    if user_agent:
+        console.print(f"[bold][UA] User-Agent:[/bold] Custom UA set")
+    if scope:
+        console.print(f"[bold][SCP] Scope:[/bold] {scope}")
+    console.print(f"[bold][DIR] Output:[/bold] {ws.path}")
+    console.print(f"[bold][FMT] Format:[/bold] {report_format}\n")
+    
+    # Parse headers and cookies
+    custom_headers = _parse_headers(headers)
+    custom_cookies = _parse_cookies(cookies)
+    
     orchestrator = SuvariOrchestrator(
         target_url=url,
         workspace=ws,
@@ -93,6 +127,14 @@ def scan(
         browser_type=browser,
         source_dir=source,
         server_scan=server,
+        proxy_url=proxy,
+        custom_headers=custom_headers,
+        custom_cookies=custom_cookies,
+        rate_limit=rate_limit,
+        timeout=timeout,
+        scope_file=scope,
+        user_agent=user_agent,
+        report_format=report_format,
     )
     orchestrator.run()
     # Save pointer to last scan
@@ -100,6 +142,59 @@ def scan(
         (Path("output") / ".last").write_text(str(ws.path))
     except Exception:
         pass
+
+
+def _parse_headers(headers_str: Optional[str]) -> dict:
+    """Parse headers from JSON string or 'Key: Value' format."""
+    if not headers_str:
+        return {}
+    
+    import json
+    try:
+        # Try JSON format first
+        return json.loads(headers_str)
+    except json.JSONDecodeError:
+        pass
+    
+    # Try 'Key: Value' format (one per line or comma-separated)
+    headers = {}
+    lines = headers_str.replace('\\n', '\n').split('\n')
+    for line in lines:
+        line = line.strip()
+        if ':' in line:
+            key, value = line.split(':', 1)
+            headers[key.strip()] = value.strip()
+        elif ',' in line:
+            # Handle comma-separated on single line
+            for pair in line.split(','):
+                if ':' in pair:
+                    k, v = pair.split(':', 1)
+                    headers[k.strip()] = v.strip()
+    
+    return headers
+
+
+def _parse_cookies(cookies_str: Optional[str]) -> dict:
+    """Parse cookies from JSON string or 'name=value' format."""
+    if not cookies_str:
+        return {}
+    
+    import json
+    try:
+        # Try JSON format first
+        return json.loads(cookies_str)
+    except json.JSONDecodeError:
+        pass
+    
+    # Try 'name=value' format
+    cookies = {}
+    pairs = cookies_str.replace(';', ' ').split()
+    for pair in pairs:
+        if '=' in pair:
+            key, value = pair.split('=', 1)
+            cookies[key.strip()] = value.strip()
+    
+    return cookies
 
 
 @app.command()

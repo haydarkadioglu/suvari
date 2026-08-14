@@ -1,42 +1,46 @@
-# Python
+```
+# Compiled and build artifacts
+*.pyc
 __pycache__/
-*.py[cod]
+*.o
+*.obj
+*.so
+*.dll
+*.exe
+*.out
+
+# Dependencies
+.venv/
+venv/
+.env
+.env.local
+.env.*
+
+# Logs and temp files
+*.log
+*.tmp
+*.swp
+
+# Editors
+.vscode/
+.idea/
+
+# Coverage reports
+.coverage
+coverage/
+htmlcov/
+
+# Python specific
+*.pyo
+*.pyd
+.Python
 *.egg-info/
 dist/
 build/
-.eggs/
 *.egg
 
-# Virtual environment
-.venv/
-venv/
-env/
-
-# Environment files
-.env
-.env.*
-
-# Output
-output/
-
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Config (keys are in ~/.config/suvari/, not here)
-config.json
-
-# Sensitive
-*.token
-gh_token*.txt
-tmp_*.txt
-/tmp/
-credentials*
-secrets*
+# MyPy cache
+.mypy_cache/
+# Pytest cache
+.pytest_cache/
+```
