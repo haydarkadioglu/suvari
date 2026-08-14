@@ -395,6 +395,57 @@ Info: whatweb, wafw00f, curl | Crack: john, hashcat | OSINT: amass, theharvester
     console.print(f"\n[green]Attack complete.[/green] [dim]{ws.path}[/dim]")
 
 
+@app.command(name="pilot")
+def pilot_cmd(target: str = typer.Argument(..., help="Target URL (e.g. https://example.com)"), model: Optional[str] = typer.Option(None, "--model", "-m", help="Model name")):
+    """Human-in-the-Loop interactive cockpit. AI suggests commands, you approve/edit/run.
+    
+    Unlike 'chat', Pilot gives you full control with AI assistance for each step.
+    Perfect for manual pentesting with AI guidance.
+    
+    Example:
+      suvari pilot https://target.com
+      suvari pilot https://app.com -m claude-sonnet-4-5
+    """
+    banner()
+    provider, model = _resolve_provider("openai", model)
+    console.print(f"[bold][TGT] Target:[/bold] {target}")
+    console.print(f"[bold][AI] Model:[/bold] {provider}/{model or 'default'}")
+    console.print("[bold cyan]🚀 Starting Pilot Mode...[/bold cyan]\n")
+    
+    from .commands.pilot import PilotSession
+    config = {"provider": provider, "model": model} if model else {"provider": provider}
+    session = PilotSession(target, config)
+    try:
+        session.run()
+    except KeyboardInterrupt:
+        console.print("\n[yellow]⚠️  Pilot session interrupted by user.[/yellow]")
+
+@app.command()
+def agent(target: str = typer.Argument(..., help="Target URL (e.g. https://example.com)"), 
+          model: Optional[str] = typer.Option(None, "--model", "-m", help="Model name")):
+    """Human-directed AI Agent — Give orders, AI executes tools autonomously
+    
+    Unlike 'chat' (passive advice) or 'scan' (fully automated), 'agent' mode
+    lets you give high-level orders which the AI executes using security tools.
+    
+    Examples:
+      suvari agent https://target.com
+      suvari agent https://app.com -m claude-sonnet-4
+    
+    Usage flow:
+      Commander: "Scan the target for open ports"
+      → AI plans and runs: nmap -sV -sC https://target.com
+      → AI analyzes output and reports findings
+      Commander: "Check for SQL injection on login form"
+      → AI runs sqlmap with appropriate parameters
+    """
+    from .commands.agent import run_agent_command
+    banner()
+    try:
+        run_agent_command(target, model=model)
+    except KeyboardInterrupt:
+        console.print("\n[yellow]⚠️  Agent session interrupted by user.[/yellow]")
+
 @app.command()
 def last():
     """Show last scan report summary"""
@@ -442,6 +493,8 @@ def help():
     t.add_section()
     t.add_row("[bold]OTHER[/bold]", "")
     t.add_row("chat", "Interactive chat + CTF")
+    t.add_row("agent <url>", "Human-directed AI Agent — give orders, AI executes tools")
+    t.add_row("pilot <url>", "Interactive cockpit — AI suggests, you approve/edit commands")
     t.add_row("report <dir>", "Show scan report")
     t.add_row("list", "List previous scans")
     t.add_row("help", "Show this message")

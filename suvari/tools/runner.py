@@ -380,3 +380,81 @@ class ToolRunner:
             "stunnel4": "SSL tunnel",
         }
         return {name: desc for name, desc in tools.items() if self.check_tool(name)}
+
+    def run_custom_command(self, command: str, timeout: int = 120, workdir: Optional[Path] = None,
+                           max_output_len: int = 50_000) -> dict:
+        """Run a custom shell command string and return detailed result.
+        
+        This method is designed for the Agent mode where AI generates raw commands.
+        Returns a dict with stdout, stderr, returncode, and command info.
+        """
+        import shlex
+        
+        try:
+            # Parse command string into list
+            cmd_list = shlex.split(command)
+        except ValueError as e:
+            return {
+                "stdout": "",
+                "stderr": f"Command parsing error: {e}",
+                "returncode": -1,
+                "command": command,
+                "error": str(e)
+            }
+        
+        if self.verbose:
+            print(f"  [agent-exec] {command[:120]}")
+        
+        try:
+            result = subprocess.run(
+                cmd_list,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                cwd=workdir,
+                env=self._env,
+            )
+            
+            stdout = clean_ansi(result.stdout)
+            stderr = clean_ansi(result.stderr)
+            output = stdout + stderr
+            
+            # Smart truncate if needed
+            if len(output) > max_output_len:
+                output = self._smart_truncate(output, max_output_len)
+            
+            return {
+                "stdout": stdout,
+                "stderr": stderr,
+                "returncode": result.returncode,
+                "command": command,
+                "output": output.strip() if output else ""
+            }
+            
+        except subprocess.TimeoutExpired:
+            return {
+                "stdout": "",
+                "stderr": "",
+                "returncode": -1,
+                "command": command,
+                "error": f"TIMEOUT after {timeout}s",
+                "output": f"(TIMEOUT after {timeout}s)"
+            }
+        except FileNotFoundError as e:
+            return {
+                "stdout": "",
+                "stderr": f"Tool not found: {cmd_list[0] if cmd_list else 'unknown'}",
+                "returncode": -1,
+                "command": command,
+                "error": str(e),
+                "output": f"(tool not found: {cmd_list[0] if cmd_list else 'unknown'})"
+            }
+        except Exception as e:
+            return {
+                "stdout": "",
+                "stderr": f"Execution error: {e}",
+                "returncode": -1,
+                "command": command,
+                "error": str(e),
+                "output": f"(error: {e})"
+            }
