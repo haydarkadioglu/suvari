@@ -271,6 +271,7 @@ class SuvariOrchestrator:
                 console.print(f"  {s}")
 
     def _run_phase(self, phase_id: str):
+        """Run a phase using dynamic agent orchestration based on context."""
         self.logger.info("phase", f"Starting: {phase_id}")
 
         if phase_id == "recon":
@@ -280,42 +281,34 @@ class SuvariOrchestrator:
             self.logger.info("phase", "Recon complete")
 
         elif phase_id == "scan":
-            console.print("  Smart scan: adaptive multi-stage")
-            from concurrent.futures import ThreadPoolExecutor, as_completed
-
-            # Stage 1: Quick recon + tech detection (parallel)
-            stage1 = {}
-            pool_size = min(self.context.get("parallel", 3), 5)
-            with ThreadPoolExecutor(max_workers=pool_size) as pool:
-                futs = {
-                    pool.submit(self._run_browser): "browser",
-                    pool.submit(self._run_cve_intel): "cve",
-                }
-                for f in as_completed(futs):
-                    n = futs[f]
-                    try:
-                        r = f.result()
-                        if n == "browser": self.context["browser_info"] = r
-                        elif n == "cve" and r: self.context["cve_findings"] = r
-                    except Exception as e:
-                        console.print(f"  {n} error: {e}")
-
-            # Stage 2: AI-driven adaptive scanning
-            self.context["scan_results"] = self._run_smart_scan()
-
-            # Stage 3: Delegate exploitation
+            # Agent-based smart scanning with dynamic orchestration
+            console.print("  [Agent Orchestrator] Starting intelligent scan pipeline...")
+            
+            # Initialize Agent Orchestrator
+            from .agents.orchestrator import AgentOrchestrator
+            orchestrator = AgentOrchestrator(
+                llm=self.llm,
+                workspace=self.ws,
+                tools=self.tools,
+                verbose=self.verbose,
+                context=self.context,
+                target_url=self.target_url
+            )
+            
+            # Run agent-based scan pipeline
+            self.context["scan_results"] = orchestrator.run_scan_pipeline()
+            
+            # Auto-delegate exploitation for critical findings
             scan_results = self.context.get("scan_results", {})
-            if scan_results and isinstance(scan_results, dict):
-                vulns = scan_results.get("vulnerabilities", [])
-                for vuln in vulns[:3]:
-                    if vuln.get("severity") in ("CRITICAL", "HIGH"):
-                        from .agents.exploiter import ExploiterAgent
-                        from .workspace import Workspace
-                        sub_ws = Workspace(f"delegated-{vuln.get('type','')[:20]}")
-                        sub = ExploiterAgent("delegated", self.llm, sub_ws, self.tools)
-                        sub.run({"target_url": self.target_url, "analysis": {"vulnerabilities": [vuln]}})
-
-            self.logger.info("phase", "Scan complete")
+            vulnerabilities = scan_results.get("vulnerabilities", [])
+            
+            for vuln in vulnerabilities[:3]:
+                if vuln.get("severity") in ("CRITICAL", "HIGH"):
+                    sub_ws = Workspace(f"delegated-{vuln.get('type','')[:20]}")
+                    sub = ExploiterAgent("delegated", self.llm, sub_ws, self.tools)
+                    sub.run({"target_url": self.target_url, "analysis": {"vulnerabilities": [vuln]}})
+            
+            self.logger.info("phase", "Agent-based scan complete")
 
         elif phase_id == "analyze":
             if self.context.get("user_suggestions"):
