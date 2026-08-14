@@ -14,6 +14,7 @@ from .scanner import ScannerAgent
 from .analyzer import AnalyzerAgent
 from .exploiter import ExploiterAgent
 from .bugbounty import BugBountyAgent
+from .infiltrator import InfiltratorAgent
 
 console = Console()
 
@@ -39,19 +40,27 @@ class AgentOrchestrator:
             "dependencies": [],
             "parallel_safe": True,
         },
-        "scanner": {
-            "class": ScannerAgent,
-            "category": "vuln_detection",
-            "description": "Vulnerability scanning with multiple tools",
-            "dependencies": ["recon"],
-            "parallel_safe": False,
-        },
         "bugbounty": {
             "class": BugBountyAgent,
             "category": "hunting",
             "description": "Bug bounty focused subdomain/URL discovery",
             "dependencies": [],
             "parallel_safe": True,
+        },
+        "infiltrator": {
+            "class": InfiltratorAgent,
+            "category": "authentication",
+            "description": "Auto-registration and login to gain authorized access",
+            "dependencies": ["recon"],
+            "parallel_safe": False,
+            "conditional": True,  # Only runs if login/register forms detected
+        },
+        "scanner": {
+            "class": ScannerAgent,
+            "category": "vuln_detection",
+            "description": "Vulnerability scanning with multiple tools",
+            "dependencies": ["recon"],
+            "parallel_safe": False,
         },
         "analyzer": {
             "class": AnalyzerAgent,
@@ -107,8 +116,14 @@ class AgentOrchestrator:
                 self.log(f"Skipping {agent_name}: dependency {dep} not completed")
                 return False
         
+        # Check conditional agents (only run if conditions are met)
+        if agent_meta.get("conditional", False):
+            if not self._check_agent_conditions(agent_name):
+                self.log(f"Skipping {agent_name}: conditions not met")
+                return False
+        
         # AI-powered decision for optional agents
-        if agent_name in ["bugbounty", "exploiter"]:
+        if agent_name in ["bugbounty", "exploiter", "infiltrator"]:
             try:
                 decision = self._ai_decide_agent(agent_name)
                 if not decision.get("should_run", True):
@@ -118,6 +133,35 @@ class AgentOrchestrator:
                 self.log(f"AI decision failed for {agent_name}, using default: {e}")
         
         return True
+    
+    def _check_agent_conditions(self, agent_name: str) -> bool:
+        """
+        Check if conditions are met for conditional agents.
+        For infiltrator: check if login/register forms were detected in recon.
+        """
+        if agent_name == "infiltrator":
+            # Check if recon detected login/register pages or forms
+            if "recon" in self.agent_results:
+                recon_result = self.agent_results["recon"]
+                
+                # Check for login/register URLs in whatweb or other recon data
+                recon_output = recon_result.get("whatweb", "") + recon_result.get("nmap", "")
+                
+                # Simple heuristic: look for common login/register indicators
+                login_indicators = ["login", "signin", "auth", "register", "signup", "form"]
+                has_login_page = any(indicator in recon_output.lower() for indicator in login_indicators)
+                
+                # Also check if there are any HTML forms detected
+                if has_login_page:
+                    self.log(f"Infiltrator conditions met: login/register forms detected")
+                    return True
+                
+                # If no clear indication, let AI decide
+                return True
+            
+            return False
+        
+        return True  # Default: conditions met
     
     def _ai_decide_agent(self, agent_name: str) -> Dict:
         """
@@ -204,6 +248,40 @@ Return JSON:
         # Create workspace for this agent
         agent_ws = Workspace(f"{self.ws.path.stem}/{agent_name}")
         
+        # Special handling for InfiltratorAgent (different constructor)
+        if agent_name == "infiltrator":
+            # InfiltratorAgent uses async execute method, not run()
+            console.print(f"  [bold cyan]▶ Running {agent_name} agent (async)...[/bold cyan]")
+            
+            # Run the async infiltrator in a sync context
+            import asyncio
+            from suvari.core.config import Config
+            
+            config = Config()
+            infiltrator = InfiltratorAgent(config)
+            
+            try:
+                result = asyncio.run(infiltrator.execute(self.target_url, {**self.context, **self.agent_results}))
+            except Exception as e:
+                console.print(f"  [red]✗ {agent_name} failed: {e}[/red]")
+                return {"error": str(e), "success": False}
+            
+            # Store result
+            self.agent_results[agent_name] = result
+            
+            # If infiltration was successful, add auth info to context for other agents
+            if result.get("success"):
+                console.print(f"  [green]✓ {agent_name} gained authorized access![/green]")
+                # Add auth cookies/tokens to context for scanner and other agents
+                self.context["auth_cookies"] = result.get("cookies", [])
+                self.context["auth_token"] = result.get("token")
+                self.context["credentials"] = result.get("credentials", {})
+            else:
+                console.print(f"  [yellow]⊘ {agent_name} could not gain access (anonymous scanning)[/yellow]")
+            
+            return result
+        
+        # Standard agent execution
         # Instantiate agent
         agent = agent_class(
             name=agent_name,
