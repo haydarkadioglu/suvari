@@ -14,6 +14,16 @@ from .tools.runner import ToolRunner
 # Suppress MCP internal noise
 logging.getLogger("mcp").setLevel(logging.WARNING)
 
+
+def configure_logging(level: int = logging.INFO) -> None:
+    """Configure root logging so module log lines reach the console.
+
+    Idempotent: ``logging.basicConfig`` is a no-op once the root logger has
+    handlers, so calling this twice does not add duplicate handlers.
+    """
+    logging.basicConfig(level=level, format="%(levelname)s %(name)s: %(message)s")
+
+
 mcp = FastMCP("Suvari — AI Pentester",
     instructions="80+ Kali Linux security tools as individual MCP tools. Use run_tool for any tool, or call the specific tool directly.",
     transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False),
