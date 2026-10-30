@@ -6,18 +6,50 @@ AI agents (Claude, Cursor, Copilot, custom) can connect and use any Kali tool.
 ## Quick Start
 
 ```bash
-# Default (streamable-http on localhost:8000)
+# Default (streamable-http on 127.0.0.1:8000)
 python suvari_mcp.py
 
-# External access (required for ngrok/Colab)
-python suvari_mcp.py --host 0.0.0.0
-
 # Custom port
-python suvari_mcp.py --host 0.0.0.0 --port 8080
+python suvari_mcp.py --port 8080
 
 # SSE transport
 python suvari_mcp.py --sse
 ```
+
+The bind address and port can also be set with the `MCP_HOST` and `MCP_PORT`
+environment variables. Command-line flags take precedence.
+
+### Network access (discouraged)
+
+> **Warning:** the server has **no authentication**. Anyone who can reach the
+> port can run every tool on this machine, which is remote code execution by
+> design. Keep the default loopback bind unless the network is fully trusted.
+
+Binding to anything other than loopback must be requested explicitly, and the
+server logs a warning at startup:
+
+```bash
+# Discouraged: reachable from the network, no authentication
+python suvari_mcp.py --host 10.1.2.3
+python suvari_mcp.py --host 0.0.0.0
+```
+
+DNS-rebinding protection stays on, so requests are only accepted if their
+`Host` header is a loopback name or the exact `--host` value. Clients must
+connect to `http://10.1.2.3:8000/mcp` in the first example. With
+`--host 0.0.0.0` a client that connects through a real IP or hostname gets
+`421 Invalid Host header`, so prefer binding the specific address.
+
+Tunnels such as ngrok send their public hostname as `Host`. Keep the loopback
+bind and have the tunnel rewrite the header:
+
+```bash
+python suvari_mcp.py
+ngrok http 8000 --host-header=localhost:8000
+```
+
+A tunnel publishes the unauthenticated server to the internet, so the warning
+above applies in full.
 
 ## Transport Formats
 
