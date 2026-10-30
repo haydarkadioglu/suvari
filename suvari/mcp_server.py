@@ -3,6 +3,8 @@ Suvari MCP Server — individual Kali tools as MCP tools.
 Each available Kali tool is its own MCP tool for AI agents.
 """
 
+import ipaddress
+import os
 import sys
 import logging
 from typing import Literal
@@ -24,15 +26,74 @@ def configure_logging(level: int = logging.INFO) -> None:
     logging.basicConfig(level=level, format="%(levelname)s %(name)s: %(message)s")
 
 
+_DEFAULT_HOST = "127.0.0.1"
+_LOOPBACK_ALLOWED_HOSTS: tuple[str, ...] = ("127.0.0.1:*", "localhost:*", "[::1]:*")
+_LOOPBACK_ALLOWED_ORIGINS: tuple[str, ...] = (
+    "http://127.0.0.1:*",
+    "http://localhost:*",
+    "http://[::1]:*",
+)
+
+
+def default_host() -> str:
+    """Return the bind address used when --host is not given.
+
+    An empty ``MCP_HOST`` falls back to loopback: passing "" to the server
+    would bind every interface.
+    """
+    return os.environ.get("MCP_HOST") or _DEFAULT_HOST
+
+
+def default_port() -> int:
+    """Return the port used when --port is not given."""
+    return int(os.environ.get("MCP_PORT", "8000"))
+
+
+def is_wildcard_host(host: str) -> bool:
+    """Return True if ``host`` means "every interface" rather than one address."""
+    return host.strip("[]") in ("0.0.0.0", "::")
+
+
+def is_loopback_host(host: str) -> bool:
+    """Return True if ``host`` only accepts connections from this machine."""
+    normalized = host.strip("[]").lower()
+    if normalized == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(normalized).is_loopback
+    except ValueError:
+        return False
+
+
+def build_transport_security(host: str) -> TransportSecuritySettings:
+    """Build DNS-rebinding settings for a server bound to ``host``.
+
+    Protection is always enabled. Loopback patterns are always allowed, and
+    ``host`` itself is added so the server does not reject, on the Host header,
+    connections it accepted on that address.
+    """
+    allowed_hosts = list(_LOOPBACK_ALLOWED_HOSTS)
+    allowed_origins = list(_LOOPBACK_ALLOWED_ORIGINS)
+    # IPv6 literals appear bracketed in Host and Origin headers
+    url_host = f"[{host}]" if ":" in host and not host.startswith("[") else host
+    if f"{url_host}:*" not in allowed_hosts:
+        allowed_hosts.append(f"{url_host}:*")
+        allowed_origins.append(f"http://{url_host}:*")
+    return TransportSecuritySettings(
+        enable_dns_rebinding_protection=True,
+        allowed_hosts=allowed_hosts,
+        allowed_origins=allowed_origins,
+    )
+
+
 mcp = FastMCP("Suvari — AI Pentester",
     instructions="80+ Kali Linux security tools as individual MCP tools. Use run_tool for any tool, or call the specific tool directly.",
-    transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False),
+    transport_security=build_transport_security(_DEFAULT_HOST),
     debug=True,
 )
 
-import os
-_MCP_HOST = os.environ.get("MCP_HOST", "0.0.0.0")
-_MCP_PORT = int(os.environ.get("MCP_PORT", "8000"))
+_MCP_HOST = default_host()
+_MCP_PORT = default_port()
 
 _runner = None
 def _get_runner():
@@ -202,7 +263,7 @@ logger.info(f"MCP ready: {len(all_tools)} tools registered")
 
 # ── Multi-transport server ────────────────────────────────────────────────
 
-def run_server(host: str = "0.0.0.0", port: int = 8000):
+def run_server(host: str = "127.0.0.1", port: int = 8000) -> None:
     """Run MCP streamable-http server with request logging."""
     import logging
     logging.getLogger("mcp").setLevel(logging.INFO)
@@ -221,6 +282,22 @@ def run_server(host: str = "0.0.0.0", port: int = 8000):
 
     mcp.settings.host = host
     mcp.settings.port = port
+    mcp.settings.transport_security = build_transport_security(host)
+    if not is_loopback_host(host):
+        logger.warning(
+            "!!! Suvari MCP is bound to %s and is REACHABLE FROM THE NETWORK. "
+            "There is NO AUTHENTICATION yet (S-04): anyone who can reach port %s "
+            "can run every tool on this machine. !!!",
+            host,
+            port,
+        )
+        if is_wildcard_host(host):
+            logger.warning(
+                "Host header validation only accepts '%s', so clients connecting through a "
+                "real address get '421 Invalid Host header'. Bind the specific interface "
+                "address (for example --host 10.1.2.3) instead of a wildcard.",
+                host,
+            )
     print(f"Suvari MCP: streamable-http on {host}:{port}")
     print(f"  POST /mcp - JSON-RPC")
     mcp.run(transport="streamable-http")
@@ -231,7 +308,7 @@ def run_server(host: str = "0.0.0.0", port: int = 8000):
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="Suvari MCP — Kali tools for AI agents")
-    parser.add_argument("--host", default="0.0.0.0", help="Bind address")
-    parser.add_argument("--port", type=int, default=8000, help="Port")
+    parser.add_argument("--host", default=default_host(), help="Bind address (default: loopback)")
+    parser.add_argument("--port", type=int, default=default_port(), help="Port")
     args = parser.parse_args()
     run_server(host=args.host, port=args.port)
