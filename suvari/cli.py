@@ -3,7 +3,7 @@ Suvari CLI — Typer-based command line interface.
 """
 
 import typer
-from typing import Optional
+from typing import List, Optional
 from pathlib import Path
 from rich.console import Console
 from rich.panel import Panel
@@ -296,6 +296,79 @@ Info: whatweb, wafw00f, curl | Crack: john, hashcat | OSINT: amass, theharvester
         history.append({"role": "user", "content": f"Results:\n{output[:2000] if 'output' in dir() else 'done'}\n\nContinue exploitation or give final summary."})
 
     console.print(f"\n[green]Attack complete.[/green] [dim]{ws.path}[/dim]")
+
+
+@app.command()
+def auto(
+    url: str = typer.Argument(..., help="Target URL (e.g. https://example.com)"),
+    output: Optional[Path] = typer.Option(None, "--output", "-o", help="Workspace directory"),
+    provider: str = typer.Option("openai", "--provider", "-p", help="LLM provider"),
+    model: Optional[str] = typer.Option(None, "--model", "-m", help="Model name"),
+    max_steps: int = typer.Option(20, "--max-steps", help="Maximum probe turns"),
+    time_budget: float = typer.Option(300.0, "--time-budget", help="Wall-clock budget (seconds)"),
+    rate_per_min: int = typer.Option(60, "--rate", help="Max requests per minute"),
+    allow_host: List[str] = typer.Option([], "--allow-host", help="Extra in-scope host(s)"),
+    resume: bool = typer.Option(False, "--resume", help="Resume a previous run (needs --output)"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Deterministic engine, no LLM"),
+):
+    """Autonomous probability-driven scan — hypotheses, evidence, decision log"""
+    banner()
+    from .auto.session import run_auto
+    from .auto.state import ScanState
+
+    provider, model = _resolve_provider(provider, model)
+
+    # Resolve the workspace root (new run gets a timestamped dir; resume reuses one).
+    if output is not None:
+        root = output
+        root.mkdir(parents=True, exist_ok=True)
+    elif resume:
+        root = _latest_auto_root()
+        if root is None:
+            console.print("[red]--resume needs a prior run; none found. Pass --output.[/red]")
+            raise typer.Exit(1)
+    else:
+        ws = Workspace(f"auto-{url.strip('/').split('/')[-1]}")
+        root = ws.path
+
+    console.print(f"[bold][TGT] Target:[/bold] {url}")
+    engine_label = "deterministic (dry-run)" if dry_run else f"{provider}/{model or 'default'}"
+    console.print(f"[bold][MODE]  Engine:[/bold] {engine_label}")
+    console.print(f"[bold][DIR] Output:[/bold] {root}")
+    console.print(f"[dim]budget: {max_steps} steps / {time_budget:.0f}s / {rate_per_min} req-min · safe mode[/dim]\n")
+
+    try:
+        result = run_auto(
+            url, root, provider=provider, model=model,
+            max_steps=max_steps, time_budget=time_budget, rate_per_min=rate_per_min,
+            resume=resume, dry_run=dry_run, allow_hosts=allow_host,
+        )
+    except RuntimeError as e:
+        console.print(f"[red][ERR] {e}[/red]")
+        raise typer.Exit(1)
+
+    findings = result.get("findings", [])
+    console.print(f"[green]Done.[/green] {result['turns']} turns, {len(findings)} findings "
+                  f"({result.get('stop_reason','')})")
+    for f in findings:
+        console.print(f"  [[{f['severity']}]] {f['title']} — {f['target']}  [dim]{f['evidence']}[/dim]")
+    console.print(f"[bold][DOC] Report:[/bold] {result['report']}")
+    try:
+        (Path("output") / ".last").write_text(str(root))
+    except Exception:
+        pass
+
+
+def _latest_auto_root() -> Optional[Path]:
+    """Most recent output/* directory that holds an auto/state.json."""
+    from .auto.state import ScanState
+    out = Path("output")
+    if not out.exists():
+        return None
+    candidates = [d for d in out.iterdir() if d.is_dir() and ScanState.exists(d)]
+    if not candidates:
+        return None
+    return max(candidates, key=lambda d: d.stat().st_mtime)
 
 
 @app.command()
