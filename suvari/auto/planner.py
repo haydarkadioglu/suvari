@@ -25,7 +25,7 @@ from dataclasses import dataclass
 from typing import Callable, Optional
 from urllib.parse import urljoin, urlparse
 
-from . import reasoning, tech_vectors
+from . import reasoning, services, tech_vectors
 from .executor import ALLOWLIST, ExecResult
 from .hypothesis import (
     Hypothesis, STATUS_CONFIRMED, STATUS_REFUTED,
@@ -143,11 +143,20 @@ RESEARCH_VECTORS = {
 }
 
 
+SERVICE_PRIOR_KNOWN = 0.5     # port open and the service was identified
+SERVICE_PRIOR_UNKNOWN = 0.3   # port open, service not identified
+
+
 class Planner:
     def __init__(self, base_url: str, llm=None, dry_run: bool = False,
                  on_blocked: Optional[Callable[[str, str], None]] = None,
-                 researcher=None, max_cves: int = 5):
+                 researcher=None, max_cves: int = 5,
+                 host_profile: Optional[dict] = None, service_mode: bool = False):
         self.base_url = base_url.rstrip("/") + "/"
+        # discovery result for this host (context for every prompt); in
+        # service mode the planner seeds protocol checks instead of web vectors
+        self.host_profile = host_profile
+        self.service_mode = service_mode
         self.llm = llm
         self.dry_run = dry_run
         self.usage = UsageTracker()
@@ -176,6 +185,12 @@ class Planner:
         generic read-only vectors so the LLM steers an informed surface rather
         than a blind one.
         """
+        if self.service_mode:
+            self._seed_services(state)
+            if self.use_llm():
+                self._llm_augment(state)
+            return
+
         # Static, built-in vectors (skip the dynamic ones added by tech/robots).
         static_keys = {v.key for v in VECTOR_RULES.values()} - set(
             tech_vectors.TECH_RULE_BY_KEY) - {"path-probe"}
@@ -346,6 +361,76 @@ class Planner:
                       c["score"], c["severity"], meta, f"research: {c['why']}")
             c["hypotheses"].append(hid)
 
+    # ── service (non-HTTP) hypotheses ───────────────────────────────────
+    def _seed_services(self, state) -> None:
+        """One hypothesis per (open port, applicable read-only check)."""
+        prof = self.host_profile or {}
+        seeded = 0
+        for p in prof.get("open_ports", []):
+            if p.get("proto", "tcp") != "tcp":
+                continue
+            for key in services.checks_for(p["service"], p.get("tls", False)):
+                if self._add_service_hyp(state, key, p, parent=None):
+                    seeded += 1
+        state.notes.append(f"host profile: {len(prof.get('open_ports', []))} open ports; "
+                           f"seeded {seeded} service checks")
+
+    def _add_service_hyp(self, state, check: str, port: dict, parent: Optional[str],
+                         prior: Optional[float] = None, title: str = "",
+                         rationale: str = "") -> Optional[Hypothesis]:
+        prof = self.host_profile or {}
+        host = prof.get("host", "")
+        netloc = f"[{host}]:{port['port']}" if ":" in host else f"{host}:{port['port']}"
+        if any(h.vector == check and h.target == netloc for h in state.hypotheses.values()):
+            return None
+        if prior is None:
+            prior = SERVICE_PRIOR_UNKNOWN if port["service"] == "unknown" else SERVICE_PRIOR_KNOWN
+        spec = services.CHECKS[check]
+        hid = state.next_hypothesis_id()
+        label = f"{port['port']}/tcp {port['service']}"
+        h = Hypothesis(
+            id=hid, title=(title or f"{spec.title} ({label})")[:120], target=netloc,
+            vector=check, prior=prior, posterior=prior,
+            severity=services.CHECK_SEVERITY.get(check, "INFO"),
+            rationale=(rationale or f"service seed: {label}"
+                       + (" (unidentified)" if port["service"] == "unknown" else ""))[:200],
+            max_attempts=1, parent=parent,
+            meta={"source": "service", "check": check, "service": port["service"],
+                  "host": host, "connect": prof.get("resolved_ip") or host,
+                  "port": port["port"], "tls": bool(port.get("tls")),
+                  "zones": _zones_for(host)},
+        )
+        state.add_hypothesis(h)
+        return h
+
+    def spawn_service_checks(self, state, parent: Hypothesis, found: list[str]) -> list[Hypothesis]:
+        """svc-identify named the service: seed its checks and fix the profile."""
+        spawned = []
+        port_no = parent.meta.get("port")
+        prof = state.host.get("profile") or {}
+        for p in prof.get("open_ports", []):
+            if p["port"] == port_no and p.get("proto", "tcp") == "tcp" and found:
+                p["service"] = found[0]
+        for svc in found:
+            port = {"port": port_no, "service": svc, "tls": parent.meta.get("tls", False)}
+            for key in services.checks_for(svc, port["tls"]):
+                h = self._add_service_hyp(state, key, port, parent=parent.id,
+                                          rationale=f"identified as {svc} by {parent.id}")
+                if h is not None:
+                    spawned.append(h)
+        return spawned
+
+    def _host_context_hint(self) -> str:
+        if not self.host_profile:
+            return ""
+        prof = self.host_profile
+        lines = ", ".join(
+            f"{p['port']}/{p.get('proto', 'tcp')} {p['service']}"
+            + (" " + " ".join(x for x in (p.get("product"), p.get("version")) if x)
+               if p.get("product") or p.get("version") else "")
+            for p in prof.get("open_ports", [])) or "no open ports"
+        return f"Host profile ({prof.get('host')}): {lines}\n"
+
     # ── selection ───────────────────────────────────────────────────────
     def select(self, state) -> Optional[Plan]:
         """Choose the next hypothesis to test (highest posterior)."""
@@ -365,6 +450,9 @@ class Planner:
                                 rationale=f"highest posterior ({h.posterior:.2f})")
 
     def _action_for(self, h: Hypothesis, source: str, rationale: str) -> Plan:
+        if h.meta.get("source") == "service":
+            return Plan(hypothesis=h, tool="suvari-svc", args=[h.vector, h.target],
+                        url=h.target, rationale=rationale, source=source)
         return Plan(hypothesis=h, tool="curl",
                     args=["-s", "-S", "-i", h.target],
                     url=h.target, rationale=rationale, source=source)
@@ -378,6 +466,8 @@ class Planner:
         """
         if h.meta.get("source") == "research":
             return reasoning.evaluate_probe(h.meta, res)
+        if h.meta.get("source") == "service":
+            return _interpret_service(h, res)
         vec = VECTOR_RULES[h.vector]
         positive, detail = vec.detect(res)
         children: list[str] = []
@@ -470,10 +560,13 @@ class Planner:
         return None
 
     def _llm_augment(self, state) -> None:
+        if self.service_mode:
+            return self._llm_augment_services(state)
         prompt = (
             "You are a web security planner. Given the target, propose up to 4 "
             "additional distinct hypotheses worth testing.\n"
             f"Target: {self.base_url}\n"
+            + self._host_context_hint()
             + self._tech_context_hint(state)
             + reasoning.llm_context(state.research)
             + self._SCHEMA_HINT
@@ -502,6 +595,44 @@ class Planner:
                 rationale=str(hd.get("rationale", "llm-proposed"))[:200],
             ))
 
+    def _llm_augment_services(self, state) -> None:
+        """Let the model propose extra read-only service checks on open ports."""
+        open_ports = {p["port"]: p for p in (self.host_profile or {}).get("open_ports", [])
+                      if p.get("proto", "tcp") == "tcp"}
+        if not open_ports:
+            return
+        host = (self.host_profile or {}).get("host", "")
+        prompt = (
+            "You are a network security planner. Given this host profile, propose up "
+            "to 4 additional read-only service checks worth running (no credentials, "
+            "no writes).\n"
+            + self._host_context_hint()
+            + 'Respond with ONLY this JSON: {"hypotheses":[{"title":str,"vector":str,'
+              '"target":"host:port","prior":float,"rationale":str}]}\n'
+            f"Valid vectors: {sorted(k for k in services.CHECKS if k != 'svc-identify')}\n"
+            f"Targets must be {host}:<port> for one of the open ports.\n"
+        )
+        data = self._llm_call_json(prompt)
+        if data is None:
+            state.fell_back_to_deterministic = True
+            return
+        for hd in (data.get("hypotheses") or [])[:4]:
+            check, target = hd.get("vector"), str(hd.get("target") or "")
+            if check not in services.CHECKS:
+                continue
+            _, _, port_s = target.rpartition(":")
+            port = open_ports.get(int(port_s)) if port_s.isdigit() else None
+            expected = f"[{host}]:" if ":" in host else f"{host}:"
+            if port is None or not target.startswith(expected):
+                self._blocked(target, "llm-proposed service target is not an open port")
+                continue
+            self._add_service_hyp(state, check, port, parent=None,
+                                  # floor keeps one positive result enough to confirm
+                                  prior=max(0.2, _safe_prob(hd.get("prior"),
+                                                            SERVICE_PRIOR_UNKNOWN)),
+                                  title=str(hd.get("title") or ""),
+                                  rationale=str(hd.get("rationale") or "llm-proposed"))
+
     def _tech_context_hint(self, state) -> str:
         """Tell the model what stack was detected and which vectors are seeded.
 
@@ -529,6 +660,7 @@ class Planner:
         prompt = (
             "Pick the single most promising hypothesis to test next and explain "
             "why. Choose from these open hypotheses:\n" + listing + "\n\n"
+            + self._host_context_hint()
             + reasoning.llm_context(state.research)
             + self._SCHEMA_HINT
             + "\nThe next_action.hypothesis_id MUST be one of the ids above and "
@@ -544,7 +676,9 @@ class Planner:
         if hid not in by_id:
             log.warning("LLM chose unknown hypothesis_id=%r; falling back", hid)
             return None
-        if tool not in ALLOWLIST:
+        if by_id[hid].meta.get("source") == "service":
+            tool = "suvari-svc"  # the check itself is the action; tool is ignored
+        if tool not in ALLOWLIST and tool != "suvari-svc":
             log.warning("LLM chose non-allowlisted tool=%r; falling back", tool)
             return None
         h = by_id[hid]
@@ -553,6 +687,35 @@ class Planner:
             h, source="llm",
             rationale=str(action.get("why", "model selection"))[:200],
         )
+
+
+def _interpret_service(h: Hypothesis, res: ExecResult) -> dict:
+    """Map a service CheckResult onto the loop's evidence vocabulary."""
+    d = res.data or {}
+    status = d.get("status", services.ERROR)
+    out = {"positive": status == services.POSITIVE,
+           "detail": d.get("detail") or res.error,
+           "severity": d.get("severity") or h.severity,
+           "children": [], "spawn_services": list(d.get("spawn") or [])}
+    if status == services.POSITIVE:
+        out["lr"] = LR_POSITIVE
+    elif status == services.NEGATIVE:
+        out["lr"] = LR_NEGATIVE
+    else:
+        out["lr"] = 1.0
+        out["inconclusive"] = status == services.INCONCLUSIVE
+    return out
+
+
+def _zones_for(host: str) -> list[str]:
+    """Zone names worth an AXFR attempt for a hostname target (none for IPs)."""
+    if not host or re.fullmatch(r"[\d.]+|[0-9a-fA-F:]+", host) or "." not in host:
+        return []
+    labels = host.rstrip(".").split(".")
+    zones = [host.rstrip(".")]
+    if len(labels) > 2:
+        zones.append(".".join(labels[-2:]))
+    return zones
 
 
 def _sev_weight(sev: str) -> int:

@@ -325,6 +325,11 @@ def auto(
     dry_run: bool = typer.Option(False, "--dry-run", help="Deterministic engine, no LLM"),
     research: Optional[str] = typer.Option(None, "--research", help="Known-CVE research for detected tech: on|off (default on)"),
     research_cache_ttl: Optional[int] = typer.Option(None, "--research-cache-ttl", help="Research cache TTL in seconds (default 86400)"),
+    ports: Optional[str] = typer.Option(None, "--ports", help="Ports for host targets: top100 (default), all, 1-1024, 22,80,8000-8100"),
+    udp: bool = typer.Option(False, "--udp", help="Also probe UDP 53/123/161 on host targets"),
+    no_web: bool = typer.Option(False, "--no-web", help="Do not web-scan HTTP(S) ports found by discovery"),
+    no_discovery: bool = typer.Option(False, "--no-discovery", help="Treat bare IP/host targets as web targets on port 80 (no port scan)"),
+    local: bool = typer.Option(False, "--local", help="Read-only security audit of this machine (works without a target)"),
 ):
     """Autonomous probability-driven scan — multi-target, resumable jobs"""
     from .auto.jobs import JobManager
@@ -351,14 +356,19 @@ def auto(
                      max_tokens=max_tokens, research_cfg=research_cfg)
         return
 
+    from .auto.discovery import parse_ports
     from .auto.jobs import parse_duration
     from .auto.scope import ScopeError, read_spec_file
 
     try:
         dur = parse_duration(duration) if duration else None
+        if ports:
+            parse_ports(ports)
     except ValueError as e:
         console.print(f"[red][ERR] {e}[/red]")
         raise typer.Exit(2)
+    discovery_cfg = {"enabled": not no_discovery, "ports": ports or "top100",
+                     "udp": udp, "web": not no_web}
 
     if resume is not None:
         try:
@@ -391,8 +401,8 @@ def auto(
             if targets_file:
                 specs += read_spec_file(targets_file)
             scope_specs = read_spec_file(scope_file) if scope_file else None
-            if not specs:
-                console.print("[red]No target given. Use URL, --target or --targets.[/red]")
+            if not specs and not local:
+                console.print("[red]No target given. Use URL, --target, --targets or --local.[/red]")
                 raise typer.Exit(2)
             job = manager.create(
                 specs, scope_specs=scope_specs, extra_scope=allow_host,
@@ -402,6 +412,7 @@ def auto(
                 max_steps=max_steps, rate_per_min=rate_per_min or 60,
                 concurrency=concurrency or 1, dry_run=dry_run,
                 provider=provider, model=model, research=research_cfg,
+                discovery=discovery_cfg, local=local,
             )
         except (ScopeError, OSError) as e:
             console.print(f"[red][ERR] scope: {e}[/red]")
@@ -452,6 +463,13 @@ def _run_job(manager, job) -> None:
         + f" / {b.get('max_requests') or '∞'} requests / {b.get('max_tokens') or '∞'} tokens"
         + f" · {b.get('max_steps')} steps per target · concurrency {b.get('concurrency')}"
         + f" · {b.get('rate_per_min')} req/min global · safe mode (GET only)[/dim]")
+    dcfg = eng.get("discovery") or {}
+    if any(t.kind == "host" for t in job.targets) or eng.get("local"):
+        console.print("[dim]discovery: "
+                      + (f"ports {dcfg.get('ports')}" + (" + udp" if dcfg.get("udp") else "")
+                         + ("" if dcfg.get("web", True) else " · no web")
+                         if dcfg.get("enabled") else "off")
+                      + (" · local audit" if eng.get("local") else "") + "[/dim]")
     rcfg = eng.get("research") or {}
     console.print("[dim]research: "
                   + (f"on ({', '.join(rcfg.get('sources', []))}; cache ttl {rcfg.get('cache_ttl')}s)"
@@ -459,7 +477,8 @@ def _run_job(manager, job) -> None:
 
     def on_event(kind: str, msg: str) -> None:
         style = {"stop": "yellow", "target-skip": "yellow", "target-error": "red",
-                 "target-end": "green"}.get(kind, "cyan")
+                 "target-end": "green", "discovery": "magenta",
+                 "local": "magenta"}.get(kind, "cyan")
         console.print(f"  [{style}]\\[{kind}][/{style}] {escape(msg)}")
 
     runner = JobRunner(job, manager, llm=llm, on_event=on_event)
@@ -473,6 +492,9 @@ def _run_job(manager, job) -> None:
     c = result["counters"]
     color = {"done": "green", "paused": "yellow"}.get(result["status"], "red")
     console.print(f"\n[{color}]{result['status'].upper()}[/{color}] — {result['stop_reason']}")
+    if c.get("open_ports") or c.get("local_findings"):
+        console.print(f"  open ports {c.get('open_ports', 0)} · "
+                      f"local findings {c.get('local_findings', 0)}")
     console.print(f"  targets {len(result['targets'])} · requests {c['requests']} · "
                   f"turns {c['turns']} · findings {c['findings']} · "
                   f"blocked {c['blocked']} · active {format_duration(c['elapsed'])}")

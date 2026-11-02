@@ -16,6 +16,11 @@ On-disk layout (everything relative to the job directory)::
       evidence/<key>/E001.json   per-target evidence (no cross-target sharing)
       evidence/<key>/evidence.md
       reports/auto-<ts>.md       one report per job (interim until final)
+      local.json                 local audit result (``--local``)
+
+Host targets (a bare IP/hostname/CIDR when discovery is on) are port-scanned
+first; the resulting host profile seeds read-only service checks, and every
+HTTP(S) port found becomes its own web target (unless ``--no-web``).
 
 If the process dies, ``JobManager.load(job_id)`` + ``JobRunner.run()`` resumes:
 finished targets are skipped, a half-scanned target reloads its state file and
@@ -42,7 +47,10 @@ from typing import Callable, Optional
 from .executor import Executor, RateLimiter
 from .loop import AutoLoop
 from .planner import Planner
-from .scope import Scope, ScopeError, Target, expand_targets, system_resolver
+from .scope import (
+    Scope, ScopeError, Target, MAX_EXPANSION, _parse_range, _slug, _split_host_port,
+    _url_for, expand_target, system_resolver,
+)
 from .state import ScanState
 
 log = logging.getLogger("suvari.auto.jobs")
@@ -149,9 +157,14 @@ class TargetProgress:
     stop_reason: str = ""
     started_at: Optional[float] = None
     finished_at: Optional[float] = None
+    kind: str = "web"          # "web" (one URL) or "host" (discovery + services)
+    ports: str = ""            # host targets: port spec override (e.g. "6379")
+    parent: str = ""           # web targets spawned from a host target's key
 
     @property
     def netloc(self) -> str:
+        if self.kind == "host":
+            return f"[{self.host}]" if ":" in self.host else self.host
         return Target(self.url, self.host, self.port).netloc
 
     @property
@@ -166,7 +179,7 @@ class TargetProgress:
 def _new_counters() -> dict:
     return {"requests": 0, "blocked": 0, "turns": 0, "findings": 0,
             "elapsed": 0.0, "runs": 0, "llm_calls": 0, "llm_tokens": 0,
-            "research_requests": 0}
+            "research_requests": 0, "open_ports": 0, "local_findings": 0}
 
 
 @dataclass
@@ -230,16 +243,24 @@ class JobManager:
                dry_run: bool = False, provider: Optional[str] = None,
                model: Optional[str] = None, resolver=system_resolver,
                job_id: Optional[str] = None,
-               research: Optional[dict] = None) -> Job:
+               research: Optional[dict] = None,
+               discovery: Optional[dict] = None, local: bool = False) -> Job:
         """Expand targets, build the scope, mark out-of-scope targets blocked.
 
         Scope defaults to the targets themselves; ``scope_specs`` (e.g. from
         ``--scope-file``) replaces that default with an explicit allowlist, and
         ``extra_scope`` (``--allow-host``) is always added. Raises
         :class:`ScopeError` on bad input or an unpermitted large range.
+
+        ``discovery`` (``{"enabled", "ports", "udp", "web"}``) turns bare
+        host/IP/CIDR targets — and ``host:port`` specs, scanned on that port
+        only — into host targets; URLs always stay web targets. ``local``
+        adds a read-only audit of this machine and allows an empty target list.
         """
-        targets = expand_targets(target_specs, allow_large=allow_large_scope)
-        if not targets:
+        disc = {"enabled": False, "ports": "top100", "udp": False, "web": True,
+                **(discovery or {})}
+        targets = _expand_specs(target_specs, allow_large_scope, disc["enabled"])
+        if not targets and not local:
             raise ScopeError("no targets given")
         entries = list(scope_specs) if scope_specs else list(target_specs)
         entries += list(extra_scope or [])
@@ -252,16 +273,20 @@ class JobManager:
                     "max_tokens": max_tokens, "max_steps": max_steps,
                     "rate_per_min": rate_per_min, "concurrency": max(1, concurrency)},
             engine={"dry_run": dry_run, "provider": provider, "model": model,
-                    "research": dict(research or {"enabled": False})},
+                    "research": dict(research or {"enabled": False}),
+                    "discovery": disc, "local": bool(local)},
         )
         used_keys: set[str] = set()
-        for t in targets:
-            key = t.key
+        for t, kind, ports in targets:
+            base = _slug(t.host) if kind == "host" else t.key
+            key = base
             n = 2
             while key in used_keys:
-                key, n = f"{t.key}-{n}", n + 1
+                key, n = f"{base}-{n}", n + 1
             used_keys.add(key)
-            tp = TargetProgress(url=t.url, key=key, host=t.host, port=t.port)
+            tp = TargetProgress(url=t.host if kind == "host" else t.url, key=key,
+                                host=t.host, port=t.port if kind == "web" else 0,
+                                kind=kind, ports=ports)
             reason = scope.check(t.url)
             if reason is not None:
                 tp.status, tp.stop_reason = T_BLOCKED, f"blocked by scope: {reason}"
@@ -302,6 +327,39 @@ class JobManager:
             if j.status != DONE:
                 return j
         return None
+
+
+def _explicit_port(spec: str) -> Optional[int]:
+    if "://" in spec or "/" in spec or _parse_range(spec) is not None:
+        return None
+    return _split_host_port(spec)[1]
+
+
+def _expand_specs(specs: list[str], allow_large: bool,
+                  discovery: bool) -> list[tuple[Target, str, str]]:
+    """Expand specs into ``(target, kind, ports)``, de-duplicated in order.
+
+    Without discovery every target is a web target (the original behaviour).
+    With it, anything that is not a URL becomes a host target; a ``host:port``
+    spec restricts that host's scan to the given port.
+    """
+    out: list[tuple[Target, str, str]] = []
+    seen: set[tuple] = set()
+    for spec in specs:
+        spec = spec.strip()
+        host_kind = discovery and "://" not in spec
+        port = _explicit_port(spec) if host_kind else None
+        for t in expand_target(spec, allow_large=allow_large):
+            kind = "host" if host_kind else "web"
+            ports = str(port) if port else ""
+            ident = (kind, t.host, ports) if host_kind else ("web", t.url)
+            if ident in seen:
+                continue
+            seen.add(ident)
+            out.append((t, kind, ports))
+    if len(out) > MAX_EXPANSION:
+        raise ScopeError(f"too many targets ({len(out)} > {MAX_EXPANSION})")
+    return out
 
 
 # ── runner ───────────────────────────────────────────────────────────────
@@ -435,6 +493,7 @@ class JobRunner:
 
         old_handlers = self._install_signals()
         try:
+            self._run_local_audit()
             self._run_targets()
             status, reason = self._final_status()
             job.status, job.stop_reason = status, reason
@@ -459,14 +518,40 @@ class JobRunner:
                 "targets": [asdict(t) for t in job.targets]}
 
     def _run_targets(self) -> None:
-        pending = [t for t in self.job.targets if t.status in RESUMABLE_TARGET]
         workers = max(1, int(self.job.budget.get("concurrency", 1)))
+        submitted: set[str] = set()
         with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="target") as pool:
-            futures = {pool.submit(self._run_target_safe, t): t for t in pending}
-            not_done = set(futures)
-            while not_done:
+            not_done: set = set()
+            while True:
+                # host targets add web targets while running: keep picking up
+                # newly added resumable targets until nothing is left in flight
+                with self._lock:
+                    fresh = [t for t in self.job.targets
+                             if t.status in RESUMABLE_TARGET and t.key not in submitted]
+                for t in fresh:
+                    submitted.add(t.key)
+                    not_done.add(pool.submit(self._run_target_safe, t))
+                if not not_done:
+                    break
                 # short timeout keeps the main thread responsive to signals
                 _, not_done = wait(not_done, timeout=0.5, return_when=FIRST_COMPLETED)
+
+    def _run_local_audit(self) -> None:
+        path = self.dir / "local.json"
+        if not self.job.engine.get("local") or path.exists():
+            return
+        from .local import run_local_audit
+        self._event("local", "auditing this machine (read-only)")
+        audit = run_local_audit()
+        _atomic_write(path, json.dumps(audit.to_dict(), indent=2))
+        with self._lock:
+            self.job.counters["local_findings"] = len(audit.findings)
+        sev: dict[str, int] = {}
+        for f in audit.findings:
+            sev[f.severity] = sev.get(f.severity, 0) + 1
+        self._event("local", f"{len(audit.findings)} findings ("
+                    + ", ".join(f"{k} {v}" for k, v in sev.items()) + f"), "
+                    f"{len(audit.listeners)} listening sockets")
 
     def _final_status(self) -> tuple[str, str]:
         reason = self._stop_reason
@@ -494,6 +579,8 @@ class JobRunner:
     def _run_target(self, t: TargetProgress) -> None:
         if self.check_stop():
             return  # left resumable
+        if t.kind == "host":
+            return self._run_host_target(t)
         b = self.job.budget
         state_file = self.dir / t.state_rel
         executor = Executor([t.netloc], rate_per_min=b.get("rate_per_min", 60),
@@ -513,10 +600,7 @@ class JobRunner:
                 self._event("target-skip", f"{t.url}: {why}")
                 return
 
-        layout = dict(state_file=state_file,
-                      evidence_dir=self.dir / t.evidence_rel,
-                      evidence_md=self.dir / t.evidence_rel / "evidence.md",
-                      evidence_rel=t.evidence_rel)
+        layout = self._layout(t)
         if state_file.exists():
             state = ScanState.load(self.dir, **layout)
         else:
@@ -536,15 +620,157 @@ class JobRunner:
 
         planner = Planner(t.url, llm=self.llm,
                           dry_run=bool(self.job.engine.get("dry_run")),
-                          on_blocked=on_blocked, researcher=self.researcher)
+                          on_blocked=on_blocked, researcher=self.researcher,
+                          host_profile=self._parent_profile(t))
+
+        self._drive(t, state, planner, executor)
+
+    # ── host targets ────────────────────────────────────────────────────
+    def _layout(self, t: TargetProgress) -> dict:
+        return dict(state_file=self.dir / t.state_rel,
+                    evidence_dir=self.dir / t.evidence_rel,
+                    evidence_md=self.dir / t.evidence_rel / "evidence.md",
+                    evidence_rel=t.evidence_rel)
+
+    def _parent_profile(self, t: TargetProgress) -> Optional[dict]:
+        if not t.parent:
+            return None
+        sf = self.dir / "targets" / f"{t.parent}.state.json"
+        try:
+            return json.loads(sf.read_text()).get("host", {}).get("profile")
+        except (OSError, ValueError):
+            return None
+
+    def _discover(self, t: TargetProgress) -> Optional[dict]:
+        """Port-scan + fingerprint one host; None if it was cut short."""
+        from .discovery import discover, parse_ports
+
+        disc = self.job.engine.get("discovery") or {}
+        ports = parse_ports(t.ports or disc.get("ports"))
+        addrs = self.scope.resolve(t.host)
+        if not addrs:
+            return {"error": f"cannot resolve {t.host}"}
+        ip = addrs[0]
+        refused: list[int] = []
+
+        def allow(port: int) -> bool:
+            if self.scope.check(f"{t.netloc}:{port}") is None:
+                return True
+            refused.append(port)
+            return False
+
+        self._event("discovery", f"{t.host}: scanning {len(ports)} TCP port(s)"
+                    + (" + UDP 53/123/161" if disc.get("udp") else ""))
+        prof = discover(t.host, ip, ports, udp=bool(disc.get("udp")),
+                        allow=allow, acquire=self.limiter.acquire)
+        if refused:
+            self.scope.record_blocked(
+                f"{t.host} ({len(set(refused))} ports)",
+                "ports outside scope (not scanned)", source=f"discovery:{t.key}")
+        if self.check_stop():
+            return None  # incomplete scan: redo it on resume
+        return prof.to_dict()
+
+    def _add_web_children(self, t: TargetProgress, profile: dict) -> int:
+        added = 0
+        with self._lock:
+            known = {x.url for x in self.job.targets}
+            keys = {x.key for x in self.job.targets}
+            for p in profile.get("open_ports", []):
+                if p.get("proto", "tcp") != "tcp" or p["service"] not in ("http", "https"):
+                    continue
+                url = _url_for(t.host, p["port"], "https" if p.get("tls") else "http")
+                if url in known:
+                    continue
+                key = base = _slug(f"{t.host}_{p['port']}")
+                n = 2
+                while key in keys:
+                    key, n = f"{base}-{n}", n + 1
+                keys.add(key)
+                child = TargetProgress(url=url, key=key, host=t.host, port=p["port"],
+                                       parent=t.key)
+                reason = self.scope.check(url)
+                if reason is not None:
+                    child.status, child.stop_reason = T_BLOCKED, f"blocked by scope: {reason}"
+                    self.scope.record_blocked(url, reason, source=f"discovery:{t.key}")
+                self.job.targets.append(child)
+                known.add(url)
+                added += 1
+        return added
+
+    def _run_host_target(self, t: TargetProgress) -> None:
+        b = self.job.budget
+        disc = self.job.engine.get("discovery") or {}
+        layout = self._layout(t)
+        state_file = layout["state_file"]
+
+        if state_file.exists():
+            state = ScanState.load(self.dir, **layout)
+        else:
+            profile = self._discover(t)
+            if profile is None:
+                return  # stopping; left resumable
+            if "error" in profile:
+                with self._lock:
+                    t.status, t.stop_reason = T_UNREACHABLE, profile["error"]
+                    t.finished_at = time.time()
+                self.checkpoint()
+                self._event("target-skip", f"{t.host}: {profile['error']}")
+                return
+            state = ScanState(self.dir, target=t.url, allowed_hosts=[t.netloc],
+                              budget={"max_steps": b.get("max_steps"), "safe": True,
+                                      "rate_per_min": b.get("rate_per_min")},
+                              **layout)
+            state.host = {"profile": profile, "checks": []}
+            state.save()
+            from .discovery import HostProfile
+            hp = HostProfile.from_dict(profile)
+            self._event("discovery", f"{t.host} ({hp.resolved_ip}): {len(hp.open_ports)} open")
+            for p in hp.open_ports:
+                self._event("port", p.label() + (f" — {p.process}" if p.process else ""))
+            with self._lock:
+                self.job.counters["open_ports"] = \
+                    self.job.counters.get("open_ports", 0) + len(hp.open_ports)
+            if disc.get("web", True):
+                n = self._add_web_children(t, profile)
+                if n:
+                    self._event("target-add", f"{t.host}: {n} web target(s) from discovery")
+            if not hp.open_ports:
+                with self._lock:
+                    t.status = T_UNREACHABLE
+                    t.stop_reason = f"no open ports among {hp.scanned} scanned"
+                    t.finished_at = time.time()
+                self.checkpoint()
+                self._event("target-skip", f"{t.host}: {t.stop_reason}")
+                return
+
+        with self._lock:
+            t.status = T_RUNNING
+            t.started_at = t.started_at or time.time()
+        self.checkpoint()
+        self._event("target-start", f"{t.host} services (turn {state.turn})")
+
+        executor = Executor([t.netloc], rate_per_min=b.get("rate_per_min", 60),
+                            default_timeout=self.probe_timeout,
+                            scope=self.scope, limiter=self.limiter)
+        planner = Planner(_url_for(t.host, None, "http"), llm=self.llm,
+                          dry_run=bool(self.job.engine.get("dry_run")),
+                          on_blocked=lambda url, reason: self.scope.record_blocked(
+                              url, reason, source=f"planner:{t.key}"),
+                          host_profile=state.host.get("profile"), service_mode=True)
+        self._drive(t, state, planner, executor)
+
+    def _drive(self, t: TargetProgress, state: ScanState, planner: Planner,
+               executor: Executor) -> None:
+        """Run the loop for one target and settle its status."""
+        b = self.job.budget
 
         def after_turn() -> None:
             with self._lock:
                 t.turns = state.turn
                 t.findings = len(state.findings)
                 if state.decision_log:
-                    d = state.decision_log[-1]
-                    t.last_hypothesis = d.get("hypothesis_id", "")
+                    t.last_hypothesis = state.decision_log[-1].get("hypothesis_id", "")
             self.checkpoint()
             if self.on_turn is not None:
                 self.on_turn(self, t)
@@ -554,7 +780,6 @@ class JobRunner:
                         time_budget=float("inf"),
                         should_stop=self.check_stop, on_turn=after_turn)
         result = loop.run()
-
         with self._lock:
             t.turns = state.turn
             t.findings = len(state.findings)

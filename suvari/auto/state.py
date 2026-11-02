@@ -57,6 +57,8 @@ class ScanState:
         }
         # known-vulnerability research: techs queried + scored CVE candidates
         self.research: dict = {}
+        # host targets: {"profile": HostProfile dict, "checks": [CheckResult dicts]}
+        self.host: dict = {}
         self._seq = 0
 
     # ── id helpers ──────────────────────────────────────────────────────
@@ -99,6 +101,7 @@ class ScanState:
             "notes": self.notes,
             "usage": self.usage,
             "research": self.research,
+            "host": self.host,
             "hypotheses": [h.to_dict() for h in self.hypotheses.values()],
             "decision_log": self.decision_log,
             "findings": self.findings,
@@ -127,6 +130,7 @@ class ScanState:
         if data.get("usage"):
             st.usage = data["usage"]
         st.research = data.get("research", {})
+        st.host = data.get("host", {})
         st.decision_log = data.get("decision_log", [])
         st.findings = data.get("findings", [])
         st.tried_actions = data.get("tried_actions", [])

@@ -63,13 +63,16 @@ class EvidenceStore:
             vector=vector,
             turn=turn,
             timestamp=time.time(),
-            request={"method": "GET", "url": res.url,
-                     "tool": res.tool, "args": res.args},
+            request={"method": res.method, "url": res.url,
+                     "tool": res.tool, "args": res.args,
+                     **({"sent": res.data.get("sent", [])} if res.data else {})},
             response={
                 "status": res.status,
                 "headers": res.headers,
                 "body": res.body[:BODY_CAP],
                 "returncode": res.returncode,
+                **({"check": {k: v for k, v in res.data.items() if k != "sent"}}
+                   if res.data else {}),
             },
             duration=round(res.duration, 3),
             failure_level=failure_level,
@@ -101,7 +104,7 @@ class EvidenceStore:
         line = (
             f"## {ev.id} — {ev.hypothesis_id} ({ev.vector}) [{mark}]{tag}\n"
             f"- turn: {ev.turn}\n"
-            f"- request: GET {ev.request['url']}\n"
+            f"- request: {ev.request.get('method', 'GET')} {ev.request['url']}\n"
             f"- status: {ev.response['status']}  "
             f"({ev.failure_level}, {ev.duration}s)\n"
             f"- detail: {ev.detail or ev.error or '-'}\n\n"

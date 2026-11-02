@@ -108,6 +108,52 @@ Defaults can be set in `~/.config/suvari/config.json`:
 
 `sources` may also include `"ghsa"`.
 
+### Hosts, services and the local machine
+
+A bare IP, hostname, CIDR or range is a **host target**: Suvari port-scans it
+first (plain TCP connect, no nmap needed), reads each port's banner, names the
+service, and then runs read-only protocol checks. Each HTTP(S) port it finds
+becomes its own web target, scanned by the normal web loop. URLs stay web
+targets. `host:port` scans only that port.
+
+```bash
+python suvari.py auto --target 10.0.0.5                     # top-100 ports + web
+python suvari.py auto --target 127.0.0.1 --ports 8000-9100 --no-web
+python suvari.py auto --target 192.168.1.0/24 --ports 22,80,443,6379 --rate 6000
+python suvari.py auto --local                               # audit this machine only
+```
+
+- **Service checks** (one attempt each, 3 s timeout, no password guessing, no
+  write commands; every payload passes a read-only guard): Redis `PING`,
+  memcached `stats`, MongoDB `isMaster` + `listDatabases nameOnly`,
+  Elasticsearch `GET /` and `/_cat/indices`, Docker API `GET /version` and
+  `/containers/json`, anonymous FTP login (no listing), SMTP `EHLO` (STARTTLS
+  only, no relay test), SSH server KEXINIT (weak algorithms), DNS `AXFR`
+  (hostname targets only), SMB null session (if `smbclient` is installed), VNC
+  security types, and TLS certificate expiry and TLS 1.0/1.1 acceptance. Only
+  counts and versions are recorded, never keys, documents or share names.
+- **Prior:** 0.5 for a check on an identified service, 0.3 for an unidentified
+  open port (its `svc-identify` check spawns the right checks once the
+  service is named).
+- **Rate:** every port-scan connect counts toward `--rate` and
+  `--max-requests`. A 1 000-port scan at the default 60/min takes about 17 min,
+  so raise `--rate` for wide scans of hosts you own.
+- **Local audit** (`--local`, read-only): listening sockets with their owning
+  processes, `sshd` settings (`sshd -T` when available), world-writable
+  critical paths, SUID/SGID binaries, `docker.sock` permissions, cron, `~/.ssh`
+  permissions, and UID 0 accounts or accounts with empty passwords.
+- The report gets **Host profile**, **Service findings** and **Local audit**
+  sections, and the summary adds counts of open ports and of service, web and
+  local findings.
+
+| Flag | Description |
+|------|-------------|
+| `--ports SPEC` | `top100` (default), `all`, `1-1024`, `22,80,8000-8100` |
+| `--udp` | Also probe UDP 53/123/161 (DNS `version.bind`, NTP time request, SNMPv3 engine discovery; no community strings) |
+| `--no-web` | Do not web-scan HTTP(S) ports found by discovery |
+| `--no-discovery` | Old behaviour: a bare IP/host is a web target on port 80 |
+| `--local` | Read-only audit of this machine; works without a target |
+
 ## `bb` — Bug Bounty Recon
 
 ```bash
