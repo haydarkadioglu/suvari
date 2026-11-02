@@ -11,6 +11,7 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 
+from . import services
 from .hypothesis import STATUS_CONFIRMED, STATUS_REFUTED
 from .state import ScanState
 from .usage import format_summary, human_tokens
@@ -77,6 +78,10 @@ _RECS = {
 }
 
 APPLICABLE = 0.35  # mirrors reasoning.APPLICABLE_THRESHOLD
+
+
+def _rec(vector: str) -> str | None:
+    return _RECS.get(vector) or services.RECOMMENDATIONS.get(vector)
 
 
 def write_report(state: ScanState, result: dict) -> Path:
@@ -162,7 +167,7 @@ def _findings_section(findings: list[dict], h: str) -> list[str]:
             a(f"- Detail: {f['detail']}")
             a(f"- Posterior: {f['posterior']}")
             a(f"- Evidence: `{f['evidence']}`")
-            rec = _RECS.get(f["vector"])
+            rec = _rec(f["vector"])
             if rec:
                 a(f"- Recommendation: {rec}")
             a("")
@@ -294,13 +299,108 @@ def _recommendations_section(findings: list[dict], h: str) -> list[str]:
     lines = [f"{h} Recommendations", ""]
     seen = set()
     for f in findings:
-        rec = _RECS.get(f["vector"])
+        rec = _rec(f["vector"])
         if rec and rec not in seen:
             lines.append(f"- {rec}")
             seen.add(rec)
     if not seen:
         lines.append("- No confirmed issues; re-run with an LLM provider for deeper coverage.")
     lines.append("")
+    return lines
+
+
+def _cell(s, n: int = 80) -> str:
+    return str(s or "").replace("|", "/").replace("\r", "").replace("\n", " ")[:n]
+
+
+def _host_section(state: ScanState, h: str) -> list[str]:
+    """Host profile (open ports) and every service check outcome."""
+    host = state.host or {}
+    prof = host.get("profile")
+    if not prof:
+        return []
+    lines = [f"{h} Host profile", ""]
+    a = lines.append
+    a(f"- Host: `{prof.get('host')}` (resolved {prof.get('resolved_ip')}); "
+      f"{prof.get('scanned', 0)} TCP ports scanned"
+      + (f", UDP 53/123/161 probed" if prof.get("udp_scanned") else "")
+      + (f", {prof['skipped']} out of scope" if prof.get("skipped") else "")
+      + f" in {prof.get('duration', 0)}s")
+    if prof.get("ssh_hostkey"):
+        a(f"- SSH host key(s): {prof['ssh_hostkey']}")
+    a("")
+    ports = prof.get("open_ports") or []
+    if ports:
+        local = any(p.get("process") for p in ports)
+        a("| Port | Service | Product / version | TLS | Banner |" + (" Process |" if local else ""))
+        a("|-----:|---------|-------------------|:---:|--------|" + ("---------|" if local else ""))
+        for p in ports:
+            prod = " ".join(x for x in (p.get("product"), p.get("version")) if x)
+            a(f"| {p['port']}/{p.get('proto', 'tcp')} | {p['service']} | {_cell(prod, 40) or '-'} "
+              f"| {'Y' if p.get('tls') else ''} | `{_cell(p.get('banner'), 70) or '-'}` |"
+              + (f" {_cell(p.get('process'), 60) or '-'} |" if local else ""))
+    else:
+        a("_No open ports found._")
+    a("")
+    checks = host.get("checks") or []
+    lines += [f"{h} Service findings", ""]
+    if checks:
+        a("| Port | Service | Check | Result | Severity | Detail | Evidence |")
+        a("|-----:|---------|-------|--------|----------|--------|----------|")
+        order = {services.POSITIVE: 0, services.ERROR: 1, services.INCONCLUSIVE: 2,
+                 services.NEGATIVE: 3}
+        for c in sorted(checks, key=lambda c: (order.get(c.get("status"), 9), c.get("port", 0))):
+            res = c.get("status", "?")
+            res = "**ISSUE**" if res == services.POSITIVE else res
+            ev = _cell(c.get("evidence"), 160)
+            a(f"| {c.get('port')} | {c.get('service')} | {c.get('check')} | {res} "
+              f"| {c.get('severity', '')} | {_cell(c.get('detail'), 120)} "
+              f"| {ev}{' — ' if ev else ''}`{c.get('evidence_path', '')}` |")
+        a("")
+        a("_All checks are read-only, single-attempt, 3 s timeout; no credentials were "
+          "guessed and no write commands were sent._")
+    else:
+        a("_No service checks ran: no open port runs a service with a protocol check (HTTP ports are covered by the web targets), or the step budget ran out._")
+    a("")
+    return lines
+
+
+def local_section(audit: dict | None, h: str = "##") -> list[str]:
+    if not audit:
+        return []
+    findings = audit.get("findings") or []
+    lines = [f"{h} Local audit", ""]
+    a = lines.append
+    st = audit.get("stats") or {}
+    a(f"- Listening sockets: {st.get('listeners', 0)} · SUID binaries: {st.get('suid', '?')} "
+      f"· SGID: {st.get('sgid', '?')} · accounts: {st.get('accounts', '?')} "
+      f"· sshd config source: {st.get('sshd_source', '-')}")
+    a("")
+    if findings:
+        a("| ID | Severity | Finding | Evidence | Fix |")
+        a("|----|----------|---------|----------|-----|")
+        for f in findings:
+            a(f"| {f['id']} | {f['severity']} | {_cell(f['title'], 90)} "
+              f"| {_cell(f['evidence'], 120)} | {_cell(f['fix'], 120)} |")
+    else:
+        a("_No local findings._")
+    a("")
+    listeners = audit.get("listeners") or []
+    if listeners:
+        a("<details><summary>Listening sockets</summary>")
+        a("")
+        a("| Proto | Address | Port | Process |")
+        a("|-------|---------|-----:|---------|")
+        for l in listeners:
+            a(f"| {l['proto']} | {l['address']} | {l['port']} "
+              f"| {l.get('process') or '-'}{' (' + str(l['pid']) + ')' if l.get('pid') else ''} |")
+        a("")
+        a("</details>")
+        a("")
+    for n in audit.get("notes") or []:
+        a(f"- Note: {n}")
+    if audit.get("notes"):
+        a("")
     return lines
 
 
@@ -363,7 +463,7 @@ def write_job_report(job, job_dir: Path, final: bool = False) -> Path:
     a("")
 
     for t in job.targets:
-        a(f"## Target: {t.url}")
+        a(f"## Target: {t.url}" + (" (host)" if getattr(t, "kind", "web") == "host" else ""))
         a("")
         a(f"- Status: {t.status}" + (f" — {t.stop_reason}" if t.stop_reason else ""))
         a(f"- Evidence directory: `{t.evidence_rel}/`")
@@ -376,11 +476,22 @@ def write_job_report(job, job_dir: Path, final: bool = False) -> Path:
           f"findings: {len(st.findings)}")
         a("")
         findings = _sorted_findings(st)
+        lines += _host_section(st, "###")
         lines += _findings_section(findings, "###")
         lines += _research_section(st, "###")
         lines += _decision_log_section(st, "###")
         lines += _tried_section(st, "###")
         lines += _notes_section(st, "###")
+
+    local_audit = None
+    lp = job_dir / "local.json"
+    if lp.exists():
+        try:
+            import json
+            local_audit = json.loads(lp.read_text())
+        except (OSError, ValueError):
+            local_audit = None
+    lines += local_section(local_audit)
 
     a("## Blocked by scope")
     a("")
@@ -397,7 +508,7 @@ def write_job_report(job, job_dir: Path, final: bool = False) -> Path:
     a("")
     seen = set()
     for f in sorted(all_findings, key=lambda f: _SEV_ORDER.get(f["severity"].upper(), 9)):
-        rec = _RECS.get(f["vector"])
+        rec = _rec(f["vector"])
         if rec and rec not in seen:
             a(f"- {rec}")
             seen.add(rec)
@@ -421,6 +532,17 @@ def write_job_report(job, job_dir: Path, final: bool = False) -> Path:
         sev[f["severity"]] = sev.get(f["severity"], 0) + 1
     a(f"- Findings: {len(all_findings)}"
       + (" (" + ", ".join(f"{k} {v}" for k, v in sorted(sev.items(), key=lambda kv: _SEV_ORDER.get(kv[0], 9))) + ")" if sev else ""))
+    svc_findings = [f for f in all_findings if f.get("source") == "service"]
+    hosts = [t for t in job.targets if getattr(t, "kind", "web") == "host"]
+    if hosts or local_audit is not None:
+        open_ports = sum(len((st.host.get("profile") or {}).get("open_ports") or [])
+                         for st in states.values() if st.host)
+        a(f"- Hosts discovered: {len(hosts)} · open ports: {open_ports} · "
+          f"web targets: {len(job.targets) - len(hosts)}")
+        a(f"- Service findings: {len(svc_findings)} · web findings: "
+          f"{len(all_findings) - len(svc_findings)}"
+          + (f" · local findings: {len(local_audit.get('findings') or [])}"
+             if local_audit is not None else ""))
     a(f"- LLM usage: {c.get('llm_calls', 0)} calls, ~{c.get('llm_tokens', 0)} tokens"
       + (f" / budget {job.budget['max_tokens']}" if job.budget.get("max_tokens") else ""))
     a(f"- Blocked by scope: {len(job.blocked)}")

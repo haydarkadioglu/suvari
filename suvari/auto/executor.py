@@ -60,6 +60,10 @@ class ExecResult:
     # True when nothing was sent because the job budget ran out or the job is
     # stopping; the turn should be rolled back and retried on resume.
     deferred: bool = False
+    # request verb for the evidence record ("GET" for HTTP, the check name for
+    # service checks) and structured payload (service CheckResult dict)
+    method: str = "GET"
+    data: dict = field(default_factory=dict)
 
 
 class ScopeError(Exception):
@@ -239,6 +243,32 @@ class Executor:
         res.ok = res.ok or status > 0
         return res
 
+
+    # ── service check (non-HTTP protocol, read-only) ────────────────────
+    def service_check(self, meta: dict, timeout: float = 3.0) -> ExecResult:
+        """Scope-checked, rate-limited run of one :mod:`services` check."""
+        from . import services
+
+        host, port, check = meta["host"], int(meta["port"]), meta["check"]
+        netloc = f"[{host}]:{port}" if ":" in host else f"{host}:{port}"
+        args = [check, netloc]
+        reason = self.scope_reason(netloc)
+        if reason is not None:
+            return ExecResult("suvari-svc", args, ok=False, url=netloc, method=check,
+                              error=self._refuse(netloc, reason, "service_check"))
+        if not self._throttle():
+            return ExecResult("suvari-svc", args, ok=False, url=netloc, method=check,
+                              deferred=True,
+                              error="request budget exhausted or job stopping (not sent)")
+        r = services.run_check(check, meta.get("connect") or host, port,
+                               timeout=timeout, meta=meta)
+        res = ExecResult("suvari-svc", args, ok=r.status != services.ERROR,
+                         duration=r.duration, url=netloc, method=check,
+                         stdout=r.evidence, body=r.evidence[:BODY_CAP],
+                         data=r.to_dict())
+        if r.status == services.ERROR:
+            res.error = r.detail
+        return res
 
     # ── reachability (TCP connect only) ─────────────────────────────────
     def tcp_reachable(self, url: str, timeout: float = 3.0) -> tuple[bool, str]:

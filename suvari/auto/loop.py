@@ -104,7 +104,8 @@ class AutoLoop:
     def run(self) -> dict:
         self.state.ensure_dirs()
         if not self.state.hypotheses:
-            recon = self._recon()
+            # host targets test protocols, not a homepage: no web recon
+            recon = None if self.planner.service_mode else self._recon()
             self.planner.bootstrap(self.state, recon)
             self._extend_scope()
             self._sync_usage()
@@ -158,6 +159,7 @@ class AutoLoop:
         h: Hypothesis = plan.hypothesis
         key = _action_key(plan.tool, plan.args)
         research = h.meta.get("source") == "research"
+        service = h.meta.get("source") == "service"
         reused = research and plan.url in self._responses
 
         # repeat protection: never run the same tool+args twice (research
@@ -176,7 +178,8 @@ class AutoLoop:
         if reused:
             res = self._responses[plan.url]
         else:
-            res = self.executor.http_probe(plan.url)
+            res = (self.executor.service_check(h.meta) if service
+                   else self.executor.http_probe(plan.url))
             if res.deferred:
                 self.state.tried_actions.remove(key)
                 h.attempts -= 1
@@ -185,7 +188,8 @@ class AutoLoop:
                 self._responses[plan.url] = res
 
         # classify L0-L5
-        classifier_output = res.error or f"HTTP {res.status}\n{res.body}"
+        classifier_output = res.error or (res.stdout if service
+                                          else f"HTTP {res.status}\n{res.body}")
         level = classify_failure(res.tool, classifier_output, res.duration)
 
         # interpret evidence against the hypothesis vector
@@ -210,6 +214,8 @@ class AutoLoop:
         # resolve status + emit finding
         if research:
             self._record_research(h, interp, ev)
+        if service:
+            self._record_service(h, res, ev)
         if interp.get("inconclusive"):
             # e.g. version not disclosed: neither confirmed nor refuted
             h.status = STATUS_EXHAUSTED
@@ -220,6 +226,13 @@ class AutoLoop:
             elif posterior_after >= CONFIRM_THRESHOLD:
                 self._emit_finding(h, interp, ev)
             # spawn follow-ups (concentrate where probability is high)
+            if interp.get("spawn_services"):
+                spawned = self.planner.spawn_service_checks(
+                    self.state, h, interp["spawn_services"])
+                if spawned:
+                    self.state.notes.append(
+                        f"{h.id} identified {', '.join(interp['spawn_services'])}; "
+                        f"spawned {len(spawned)} service checks")
             if interp["children"]:
                 spawned = self.planner.spawn_children(self.state, h, interp["children"])
                 if spawned:
@@ -258,6 +271,16 @@ class AutoLoop:
                 "evidence": self.evidence.rel_path(ev),
             })
 
+    def _record_service(self, h: Hypothesis, res, ev) -> None:
+        """Keep every service check outcome (positive or not) for the report."""
+        d = dict(res.data) if res.data else {
+            "service": h.meta.get("service"), "check": h.vector,
+            "host": h.meta.get("host"), "port": h.meta.get("port"),
+            "status": "error", "severity": "INFO", "detail": res.error,
+            "evidence": "", "sent": [], "safe": True}
+        d.update(hypothesis=h.id, evidence_path=self.evidence.rel_path(ev))
+        self.state.host.setdefault("checks", []).append(d)
+
     def _emit_research_findings(self, h: Hypothesis, interp: dict, ev) -> None:
         """One finding per CVE whose affected range contains the target version."""
         by_id = {c["id"]: c for c in h.meta.get("cves", [])}
@@ -285,7 +308,12 @@ class AutoLoop:
         if any(f["vector"] == h.vector and f["target"] == h.target
                for f in self.state.findings):
             return
+        extra = {}
+        if h.meta.get("source") == "service":
+            extra = {"source": "service", "service": h.meta.get("service"),
+                     "port": h.meta.get("port"), "check": h.vector}
         self.state.findings.append({
+            **extra,
             "id": f"F{len(self.state.findings) + 1:03d}",
             "hypothesis_id": h.id,
             "title": h.title,
