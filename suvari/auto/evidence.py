@@ -1,0 +1,93 @@
+"""
+Evidence capture for the autonomous loop.
+
+Every probe produces a machine-readable record at
+``<workspace>/auto/evidence/<id>.json`` (request, status, headers, body slice,
+duration) and a human-readable line appended to ``<workspace>/auto/evidence.md``.
+"""
+
+from __future__ import annotations
+
+import json
+import time
+from dataclasses import dataclass, field, asdict
+from pathlib import Path
+
+from .executor import ExecResult, BODY_CAP
+
+
+@dataclass
+class Evidence:
+    id: str
+    hypothesis_id: str
+    vector: str
+    turn: int
+    timestamp: float
+    request: dict
+    response: dict
+    duration: float
+    failure_level: str
+    positive: bool
+    detail: str
+    error: str = ""
+    extra: dict = field(default_factory=dict)
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+class EvidenceStore:
+    def __init__(self, auto_dir: Path):
+        self.dir = Path(auto_dir) / "evidence"
+        self.md = Path(auto_dir) / "evidence.md"
+        self._seq = 0
+
+    def next_id(self) -> str:
+        self._seq += 1
+        return f"E{self._seq:03d}"
+
+    def record(self, hypothesis_id: str, vector: str, turn: int,
+               res: ExecResult, failure_level: str, positive: bool,
+               detail: str) -> Evidence:
+        self.dir.mkdir(parents=True, exist_ok=True)
+        ev = Evidence(
+            id=self.next_id(),
+            hypothesis_id=hypothesis_id,
+            vector=vector,
+            turn=turn,
+            timestamp=time.time(),
+            request={"method": "GET", "url": res.url,
+                     "tool": res.tool, "args": res.args},
+            response={
+                "status": res.status,
+                "headers": res.headers,
+                "body": res.body[:BODY_CAP],
+                "returncode": res.returncode,
+            },
+            duration=round(res.duration, 3),
+            failure_level=failure_level,
+            positive=positive,
+            detail=detail,
+            error=res.error,
+        )
+        (self.dir / f"{ev.id}.json").write_text(json.dumps(ev.to_dict(), indent=2))
+        self._append_md(ev)
+        return ev
+
+    def rel_path(self, ev: Evidence) -> str:
+        return f"auto/evidence/{ev.id}.json"
+
+    def _append_md(self, ev: Evidence) -> None:
+        if not self.md.exists():
+            self.md.write_text("# Evidence log\n\n")
+        mark = "POSITIVE" if ev.positive else "negative"
+        line = (
+            f"## {ev.id} — {ev.hypothesis_id} ({ev.vector}) [{mark}]\n"
+            f"- turn: {ev.turn}\n"
+            f"- request: GET {ev.request['url']}\n"
+            f"- status: {ev.response['status']}  "
+            f"({ev.failure_level}, {ev.duration}s)\n"
+            f"- detail: {ev.detail or ev.error or '-'}\n\n"
+        )
+        with self.md.open("a") as fh:
+            fh.write(line)
