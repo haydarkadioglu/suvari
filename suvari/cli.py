@@ -280,9 +280,7 @@ Info: whatweb, wafw00f, curl | Crack: john, hashcat | OSINT: amass, theharvester
                 task = progress.add_task(f"  Running: {cmd[:60]}...", total=None)
                 try:
                     if "|" in cmd:
-                        import subprocess as sp
-                        r = sp.run(cmd, shell=True, capture_output=True, text=True, timeout=120)
-                        output = r.stdout[:1500] + r.stderr[:500]
+                        output = tr.run_pipeline(cmd, timeout=120)[:2000]
                     else:
                         import shlex
                         output = tr.run(shlex.split(cmd), timeout=120)[:2000]

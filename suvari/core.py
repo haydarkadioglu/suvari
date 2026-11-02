@@ -180,8 +180,7 @@ class SuvariCore:
             for cmd in cmds[:3]:
                 try:
                     if "|" in cmd:
-                        r = sp.run(cmd, shell=True, capture_output=True, text=True, timeout=300)
-                        output = (r.stdout + r.stderr)
+                        output = self.tools.run_pipeline(cmd, timeout=300)
                     else:
                         output = self.tools.run(shlex.split(cmd), timeout=300, max_output_len=50_000)
                 except sp.TimeoutExpired:

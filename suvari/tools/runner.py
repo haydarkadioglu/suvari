@@ -9,20 +9,13 @@ import re
 from pathlib import Path
 from typing import Optional, Callable
 
+from .pipeline import PipelineError, clean_ansi, run_pipeline, split_pipeline  # clean_ansi re-exported for existing callers
+
 # Critical patterns to preserve from truncation
 _CRITICAL_PATTERNS = re.compile(
     r'\[?(critical|high|CRITICAL|HIGH|cve-\d{4}|vulnerability|VULNERABILITY|exposed|EXPOSED|sql\s*inj|XSS|rce|RCE|LFI|SSRF)\]?',
     re.IGNORECASE
 )
-
-
-# ANSI escape sequence cleaner
-_ANSI_RE = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
-
-
-def clean_ansi(text: str) -> str:
-    """Remove ANSI escape sequences from tool output."""
-    return _ANSI_RE.sub('', text)
 
 
 class ToolRunner:
@@ -68,6 +61,44 @@ class ToolRunner:
             return self._cache[cache_key]
         except FileNotFoundError:
             self._cache[cache_key] = f"(tool not found: {cmd[0]})"
+            return self._cache[cache_key]
+        except Exception as e:
+            self._cache[cache_key] = f"(error: {e})"
+            return self._cache[cache_key]
+
+    def run_pipeline(self, command: str, timeout: int = 120,
+                     workdir: Optional[Path] = None) -> str:
+        """Run a shell-free pipeline, with the same caching policy as :meth:`run`."""
+        try:
+            stages = split_pipeline(command)
+        except PipelineError as e:
+            return f"(error: {e})"
+
+        cache_key = (tuple(tuple(s) for s in stages), str(workdir))
+        if cache_key in self._cache:
+            if self.verbose:
+                print(f"  [cache] reused: {command[:80]}")
+            return self._cache[cache_key]
+
+        # Evict oldest if cache is full
+        if len(self._cache) >= self._MAX_CACHE:
+            self._cache.pop(next(iter(self._cache)))
+        if self.verbose:
+            print(f"  [exec] {command[:120]}")
+        try:
+            output = run_pipeline(command, timeout=timeout, workdir=workdir)
+            output = clean_ansi(output)
+            output = self._smart_truncate(output, 50_000) if len(output) > 50_000 else output
+            self._cache[cache_key] = output
+            return output
+        except subprocess.TimeoutExpired:
+            self._cache[cache_key] = f"(TIMEOUT after {timeout}s)"
+            return self._cache[cache_key]
+        except FileNotFoundError as e:
+            self._cache[cache_key] = f"(tool not found: {e})"
+            return self._cache[cache_key]
+        except PipelineError as e:
+            self._cache[cache_key] = f"(error: {e})"
             return self._cache[cache_key]
         except Exception as e:
             self._cache[cache_key] = f"(error: {e})"
