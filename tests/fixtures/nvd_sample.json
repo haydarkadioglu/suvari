@@ -1,0 +1,1427 @@
+{
+ "resultsPerPage": 6,
+ "startIndex": 0,
+ "totalResults": 6,
+ "format": "NVD_CVE",
+ "version": "2.0",
+ "timestamp": "2026-11-02T12:55:02.602",
+ "vulnerabilities": [
+  {
+   "cve": {
+    "id": "CVE-2024-56332",
+    "sourceIdentifier": "security-advisories@github.com",
+    "published": "2025-01-03T21:15:13.550",
+    "lastModified": "2026-06-17T08:12:03.743",
+    "vulnStatus": "Analyzed",
+    "cveTags": [],
+    "descriptions": [
+     {
+      "lang": "en",
+      "value": "Next.js is a React framework for building full-stack web applications. Starting in version 13.0.0 and prior to versions 13.5.8, 14.2.21, and 15.1.2, Next.js is vulnerable to a Denial of Service (DoS) attack that allows attackers to construct requests that leaves requests to Server Actions hanging until the hosting provider cancels the function execution. This vulnerability can also be used as a Denial of Wallet (DoW) attack when deployed in providers billing by response times. (Note: Next.js server is idle during that time and only keeps the connection open. CPU and memory footprint are low during that time.). Deployments without any protection against long running Server Action invocations are especially vulnerable. Hosting providers like Vercel or Netlify set a default maximum duration on function execution to reduce the risk of excessive billing. This is the same issue as if the incoming HTTP request has an invalid `Content-Length` header or never closes. If the host has no other mitigations to those then this vulnerability is novel. This vulnerability affects only Next.js deployments using Server Actions. The issue was resolved in Next.js 13.5.8, 14.2.21, and 15.1.2. We recommend that users upgrade to a safe version. There are no official workarounds."
+     }
+    ],
+    "affected": [
+     {
+      "source": "security-advisories@github.com",
+      "affectedData": [
+       {
+        "vendor": "vercel",
+        "product": "next.js",
+        "versions": [
+         {
+          "version": ">= 13.0.0, < 13.5.8",
+          "status": "affected"
+         },
+         {
+          "version": ">= 14.0.0, < 14.2.21",
+          "status": "affected"
+         },
+         {
+          "version": ">= 15.0.0, < 15.1.2",
+          "status": "affected"
+         }
+        ]
+       }
+      ]
+     }
+    ],
+    "metrics": {
+     "cvssMetricV31": [
+      {
+       "source": "security-advisories@github.com",
+       "type": "Secondary",
+       "cvssData": {
+        "version": "3.1",
+        "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:L",
+        "baseScore": 5.3,
+        "baseSeverity": "MEDIUM",
+        "attackVector": "NETWORK",
+        "attackComplexity": "LOW",
+        "privilegesRequired": "NONE",
+        "userInteraction": "NONE",
+        "scope": "UNCHANGED",
+        "confidentialityImpact": "NONE",
+        "integrityImpact": "NONE",
+        "availabilityImpact": "LOW"
+       },
+       "exploitabilityScore": 3.9,
+       "impactScore": 1.4
+      }
+     ],
+     "ssvcV203": [
+      {
+       "source": "134c704f-9b21-4f2e-91b3-4a467353bcc0",
+       "ssvcData": {
+        "timestamp": "2025-01-03T20:50:53.098540Z",
+        "id": "CVE-2024-56332",
+        "options": [
+         {
+          "exploitation": "none"
+         },
+         {
+          "automatable": "no"
+         },
+         {
+          "technicalImpact": "partial"
+         }
+        ],
+        "role": "CISA Coordinator",
+        "version": "2.0.3"
+       }
+      }
+     ]
+    },
+    "weaknesses": [
+     {
+      "source": "security-advisories@github.com",
+      "type": "Secondary",
+      "description": [
+       {
+        "lang": "en",
+        "value": "CWE-770"
+       }
+      ]
+     }
+    ],
+    "configurations": [
+     {
+      "nodes": [
+       {
+        "operator": "OR",
+        "negate": false,
+        "cpeMatch": [
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:a:vercel:next.js:*:*:*:*:*:node.js:*:*",
+          "versionStartIncluding": "13.0.0",
+          "versionEndExcluding": "13.5.8",
+          "matchCriteriaId": "E7196D78-BDDA-4939-B9E0-89BCDA3C64C9"
+         },
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:a:vercel:next.js:*:*:*:*:*:node.js:*:*",
+          "versionStartIncluding": "14.0.0",
+          "versionEndExcluding": "14.2.21",
+          "matchCriteriaId": "D3BE3E65-BCF1-45DE-8154-E7FE187EB497"
+         },
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:a:vercel:next.js:*:*:*:*:*:node.js:*:*",
+          "versionStartIncluding": "15.0.0",
+          "versionEndExcluding": "15.1.2",
+          "matchCriteriaId": "432A4401-5564-4D0B-82BD-11322EA7FEDF"
+         }
+        ]
+       }
+      ]
+     }
+    ],
+    "references": [
+     {
+      "url": "https://github.com/vercel/next.js/security/advisories/GHSA-7m27-7ghc-44w9",
+      "source": "security-advisories@github.com",
+      "tags": [
+       "Vendor Advisory"
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "cve": {
+    "id": "CVE-2025-29927",
+    "sourceIdentifier": "security-advisories@github.com",
+    "published": "2025-03-21T15:15:42.660",
+    "lastModified": "2026-06-17T09:05:53.640",
+    "vulnStatus": "Analyzed",
+    "cveTags": [],
+    "descriptions": [
+     {
+      "lang": "en",
+      "value": "Next.js is a React framework for building full-stack web applications. Starting in version 1.11.4 and prior to versions 12.3.5, 13.5.9, 14.2.25, and 15.2.3, it is possible to bypass authorization checks within a Next.js application, if the authorization check occurs in middleware. If patching to a safe version is infeasible, it is recommend that you prevent external user requests which contain the x-middleware-subrequest header from reaching your Next.js application. This vulnerability is fixed in 12.3.5, 13.5.9, 14.2.25, and 15.2.3."
+     }
+    ],
+    "affected": [
+     {
+      "source": "security-advisories@github.com",
+      "affectedData": [
+       {
+        "vendor": "vercel",
+        "product": "next.js",
+        "versions": [
+         {
+          "version": ">= 11.1.4, < 12.3.5",
+          "status": "affected"
+         },
+         {
+          "version": ">= 14.0.0, < 14.2.25",
+          "status": "affected"
+         },
+         {
+          "version": ">= 15.0.0, < 15.2.3",
+          "status": "affected"
+         },
+         {
+          "version": ">= 13.0.0, < 13.5.9",
+          "status": "affected"
+         }
+        ]
+       }
+      ]
+     }
+    ],
+    "metrics": {
+     "cvssMetricV31": [
+      {
+       "source": "security-advisories@github.com",
+       "type": "Secondary",
+       "cvssData": {
+        "version": "3.1",
+        "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:N",
+        "baseScore": 9.1,
+        "baseSeverity": "CRITICAL",
+        "attackVector": "NETWORK",
+        "attackComplexity": "LOW",
+        "privilegesRequired": "NONE",
+        "userInteraction": "NONE",
+        "scope": "UNCHANGED",
+        "confidentialityImpact": "HIGH",
+        "integrityImpact": "HIGH",
+        "availabilityImpact": "NONE"
+       },
+       "exploitabilityScore": 3.9,
+       "impactScore": 5.2
+      }
+     ],
+     "ssvcV203": [
+      {
+       "source": "134c704f-9b21-4f2e-91b3-4a467353bcc0",
+       "ssvcData": {
+        "timestamp": "2025-04-08T15:16:38.515188Z",
+        "id": "CVE-2025-29927",
+        "options": [
+         {
+          "exploitation": "none"
+         },
+         {
+          "automatable": "yes"
+         },
+         {
+          "technicalImpact": "total"
+         }
+        ],
+        "role": "CISA Coordinator",
+        "version": "2.0.3"
+       }
+      }
+     ]
+    },
+    "weaknesses": [
+     {
+      "source": "security-advisories@github.com",
+      "type": "Secondary",
+      "description": [
+       {
+        "lang": "en",
+        "value": "CWE-285"
+       }
+      ]
+     },
+     {
+      "source": "nvd@nist.gov",
+      "type": "Primary",
+      "description": [
+       {
+        "lang": "en",
+        "value": "CWE-863"
+       }
+      ]
+     }
+    ],
+    "configurations": [
+     {
+      "nodes": [
+       {
+        "operator": "OR",
+        "negate": false,
+        "cpeMatch": [
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:a:vercel:next.js:*:*:*:*:*:node.js:*:*",
+          "versionStartIncluding": "11.1.4",
+          "versionEndExcluding": "12.3.5",
+          "matchCriteriaId": "6D275D05-70E5-49CA-BCFE-74B31DB3D8EF"
+         },
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:a:vercel:next.js:*:*:*:*:*:node.js:*:*",
+          "versionStartIncluding": "13.0.0",
+          "versionEndExcluding": "13.5.9",
+          "matchCriteriaId": "49731FD6-617A-42DE-9F95-A7F42809C32F"
+         },
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:a:vercel:next.js:*:*:*:*:*:node.js:*:*",
+          "versionStartIncluding": "14.0.0",
+          "versionEndExcluding": "14.2.25",
+          "matchCriteriaId": "5F836D0E-1580-40C6-93E5-6DB939E7BA86"
+         },
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:a:vercel:next.js:*:*:*:*:*:node.js:*:*",
+          "versionStartIncluding": "15.0.0",
+          "versionEndExcluding": "15.2.3",
+          "matchCriteriaId": "E214D84F-7B55-4089-B1C4-9BF8B7AC7375"
+         }
+        ]
+       }
+      ]
+     }
+    ],
+    "references": [
+     {
+      "url": "https://github.com/vercel/next.js/commit/52a078da3884efe6501613c7834a3d02a91676d2",
+      "source": "security-advisories@github.com",
+      "tags": [
+       "Patch"
+      ]
+     },
+     {
+      "url": "https://github.com/vercel/next.js/commit/5fd3ae8f8542677c6294f32d18022731eab6fe48",
+      "source": "security-advisories@github.com",
+      "tags": [
+       "Patch"
+      ]
+     },
+     {
+      "url": "https://github.com/vercel/next.js/releases/tag/v12.3.5",
+      "source": "security-advisories@github.com",
+      "tags": [
+       "Release Notes"
+      ]
+     },
+     {
+      "url": "https://github.com/vercel/next.js/releases/tag/v13.5.9",
+      "source": "security-advisories@github.com",
+      "tags": [
+       "Release Notes"
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "cve": {
+    "id": "CVE-2025-55173",
+    "sourceIdentifier": "security-advisories@github.com",
+    "published": "2025-08-29T22:15:31.750",
+    "lastModified": "2026-10-18T21:10:00.120",
+    "vulnStatus": "Analyzed",
+    "cveTags": [],
+    "descriptions": [
+     {
+      "lang": "en",
+      "value": "Next.js is a React framework for building full-stack web applications. In versions before 14.2.31 and from 15.0.0 to before 15.4.5, Next.js Image Optimization is vulnerable to content injection. The issue allowed attacker-controlled external image sources to trigger file downloads with arbitrary content and filenames under specific configurations. This behavior could be abused for phishing or malicious file delivery. This vulnerability has been fixed in Next.js versions 14.2.31 and 15.4.5."
+     }
+    ],
+    "affected": [
+     {
+      "source": "security-advisories@github.com",
+      "affectedData": [
+       {
+        "vendor": "vercel",
+        "product": "next.js",
+        "versions": [
+         {
+          "version": ">= 15.0.0, < 15.4.5",
+          "status": "affected"
+         },
+         {
+          "version": "< 14.2.31",
+          "status": "affected"
+         }
+        ]
+       }
+      ]
+     }
+    ],
+    "metrics": {
+     "cvssMetricV31": [
+      {
+       "source": "security-advisories@github.com",
+       "type": "Secondary",
+       "cvssData": {
+        "version": "3.1",
+        "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:N/I:L/A:N",
+        "baseScore": 4.3,
+        "baseSeverity": "MEDIUM",
+        "attackVector": "NETWORK",
+        "attackComplexity": "LOW",
+        "privilegesRequired": "NONE",
+        "userInteraction": "REQUIRED",
+        "scope": "UNCHANGED",
+        "confidentialityImpact": "NONE",
+        "integrityImpact": "LOW",
+        "availabilityImpact": "NONE"
+       },
+       "exploitabilityScore": 2.8,
+       "impactScore": 1.4
+      }
+     ],
+     "ssvcV203": [
+      {
+       "source": "134c704f-9b21-4f2e-91b3-4a467353bcc0",
+       "ssvcData": {
+        "timestamp": "2025-09-02T19:22:48.480499Z",
+        "id": "CVE-2025-55173",
+        "options": [
+         {
+          "exploitation": "none"
+         },
+         {
+          "automatable": "no"
+         },
+         {
+          "technicalImpact": "partial"
+         }
+        ],
+        "role": "CISA Coordinator",
+        "version": "2.0.3"
+       }
+      }
+     ]
+    },
+    "weaknesses": [
+     {
+      "source": "security-advisories@github.com",
+      "type": "Secondary",
+      "description": [
+       {
+        "lang": "en",
+        "value": "CWE-20"
+       }
+      ]
+     }
+    ],
+    "configurations": [
+     {
+      "nodes": [
+       {
+        "operator": "OR",
+        "negate": false,
+        "cpeMatch": [
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:a:vercel:next.js:*:*:*:*:*:node.js:*:*",
+          "versionEndExcluding": "14.2.31",
+          "matchCriteriaId": "88CF5491-9D3E-4538-B7F4-9B2FACB57878"
+         },
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:a:vercel:next.js:*:*:*:*:*:node.js:*:*",
+          "versionStartIncluding": "15.0.0",
+          "versionEndExcluding": "15.4.5",
+          "matchCriteriaId": "2FE23799-8927-4736-934B-BC2BB6F9BB63"
+         }
+        ]
+       }
+      ]
+     }
+    ],
+    "references": [
+     {
+      "url": "https://github.com/vercel/next.js/commit/6b12c60c61ee80cb0443ccd20de82ca9b4422ddd",
+      "source": "security-advisories@github.com",
+      "tags": [
+       "Patch"
+      ]
+     },
+     {
+      "url": "https://github.com/vercel/next.js/security/advisories/GHSA-xv57-4mr9-wg8v",
+      "source": "security-advisories@github.com",
+      "tags": [
+       "Vendor Advisory"
+      ]
+     },
+     {
+      "url": "https://vercel.com/changelog/cve-2025-55173",
+      "source": "security-advisories@github.com",
+      "tags": [
+       "Vendor Advisory"
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "cve": {
+    "id": "CVE-2025-55182",
+    "sourceIdentifier": "cve-assign@fb.com",
+    "published": "2025-12-03T16:15:56.463",
+    "lastModified": "2026-10-18T17:10:00.110",
+    "vulnStatus": "Analyzed",
+    "cveTags": [],
+    "descriptions": [
+     {
+      "lang": "en",
+      "value": "A pre-authentication remote code execution vulnerability exists in React Server Components versions 19.0.0, 19.1.0, 19.1.1, and 19.2.0 including the following packages: react-server-dom-parcel, react-server-dom-turbopack, and react-server-dom-webpack. The vulnerable code unsafely deserializes payloads from HTTP requests to Server Function endpoints."
+     }
+    ],
+    "affected": [
+     {
+      "source": "cve-assign@fb.com",
+      "affectedData": [
+       {
+        "vendor": "Meta",
+        "product": "react-server-dom-webpack",
+        "defaultStatus": "unaffected",
+        "versions": [
+         {
+          "version": "19.0.0",
+          "lessThanOrEqual": "19.0.0",
+          "versionType": "semver",
+          "status": "affected"
+         },
+         {
+          "version": "19.1.0",
+          "lessThanOrEqual": "19.1.1",
+          "versionType": "semver",
+          "status": "affected"
+         },
+         {
+          "version": "19.2.0",
+          "lessThanOrEqual": "19.2.0",
+          "versionType": "semver",
+          "status": "affected"
+         }
+        ]
+       },
+       {
+        "vendor": "Meta",
+        "product": "react-server-dom-turbopack",
+        "defaultStatus": "unaffected",
+        "versions": [
+         {
+          "version": "19.0.0",
+          "lessThanOrEqual": "19.0.0",
+          "versionType": "semver",
+          "status": "affected"
+         },
+         {
+          "version": "19.1.0",
+          "lessThanOrEqual": "19.1.1",
+          "versionType": "semver",
+          "status": "affected"
+         },
+         {
+          "version": "19.2.0",
+          "lessThanOrEqual": "19.2.0",
+          "versionType": "semver",
+          "status": "affected"
+         }
+        ]
+       },
+       {
+        "vendor": "Meta",
+        "product": "react-server-dom-parcel",
+        "defaultStatus": "unaffected",
+        "versions": [
+         {
+          "version": "19.0.0",
+          "lessThanOrEqual": "19.0.0",
+          "versionType": "semver",
+          "status": "affected"
+         },
+         {
+          "version": "19.1.0",
+          "lessThanOrEqual": "19.1.1",
+          "versionType": "semver",
+          "status": "affected"
+         },
+         {
+          "version": "19.2.0",
+          "lessThanOrEqual": "19.2.0",
+          "versionType": "semver",
+          "status": "affected"
+         }
+        ]
+       }
+      ]
+     }
+    ],
+    "metrics": {
+     "cvssMetricV31": [
+      {
+       "source": "cve-assign@fb.com",
+       "type": "Secondary",
+       "cvssData": {
+        "version": "3.1",
+        "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H",
+        "baseScore": 10.0,
+        "baseSeverity": "CRITICAL",
+        "attackVector": "NETWORK",
+        "attackComplexity": "LOW",
+        "privilegesRequired": "NONE",
+        "userInteraction": "NONE",
+        "scope": "CHANGED",
+        "confidentialityImpact": "HIGH",
+        "integrityImpact": "HIGH",
+        "availabilityImpact": "HIGH"
+       },
+       "exploitabilityScore": 3.9,
+       "impactScore": 6.0
+      }
+     ],
+     "ssvcV203": [
+      {
+       "source": "134c704f-9b21-4f2e-91b3-4a467353bcc0",
+       "ssvcData": {
+        "timestamp": "2026-08-04T03:56:02.696515Z",
+        "id": "CVE-2025-55182",
+        "options": [
+         {
+          "exploitation": "active"
+         },
+         {
+          "automatable": "yes"
+         },
+         {
+          "technicalImpact": "total"
+         }
+        ],
+        "role": "CISA Coordinator",
+        "version": "2.0.3"
+       }
+      }
+     ]
+    },
+    "weaknesses": [
+     {
+      "source": "nvd@nist.gov",
+      "type": "Primary",
+      "description": [
+       {
+        "lang": "en",
+        "value": "CWE-502"
+       }
+      ]
+     },
+     {
+      "source": "134c704f-9b21-4f2e-91b3-4a467353bcc0",
+      "type": "Secondary",
+      "description": [
+       {
+        "lang": "en",
+        "value": "CWE-502"
+       }
+      ]
+     }
+    ],
+    "configurations": [
+     {
+      "nodes": [
+       {
+        "operator": "OR",
+        "negate": false,
+        "cpeMatch": [
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:a:facebook:react:19.0.0:*:*:*:*:*:*:*",
+          "matchCriteriaId": "C66E1B0F-8C3F-4D27-9F46-B6EC78D8C60B"
+         },
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:a:facebook:react:19.1.0:*:*:*:*:*:*:*",
+          "matchCriteriaId": "C6C1C3E2-542D-4001-BFA9-6CF5A038971D"
+         },
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:a:facebook:react:19.1.1:*:*:*:*:*:*:*",
+          "matchCriteriaId": "A0907E1C-E2D2-44A4-AA46-CE80BCA4E015"
+         },
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:a:facebook:react:19.2.0:*:*:*:*:*:*:*",
+          "matchCriteriaId": "0030B5E1-E79E-4C48-B500-91747FE2751D"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "nodes": [
+       {
+        "operator": "OR",
+        "negate": false,
+        "cpeMatch": [
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:a:vercel:next.js:*:*:*:*:*:node.js:*:*",
+          "versionStartIncluding": "15.0.0",
+          "versionEndExcluding": "15.0.5",
+          "matchCriteriaId": "FC2BCD83-CC87-4CDC-AD9B-2055912A8463"
+         },
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:a:vercel:next.js:*:*:*:*:*:node.js:*:*",
+          "versionStartIncluding": "15.1.0",
+          "versionEndExcluding": "15.1.9",
+          "matchCriteriaId": "C5E767D4-E46F-4CA6-A22F-4D0671B9B102"
+         },
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:a:vercel:next.js:*:*:*:*:*:node.js:*:*",
+          "versionStartIncluding": "15.2.0",
+          "versionEndExcluding": "15.2.6",
+          "matchCriteriaId": "5EFB6CB7-4A4F-464A-A1D8-62B50DF0B4BA"
+         },
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:a:vercel:next.js:*:*:*:*:*:node.js:*:*",
+          "versionStartIncluding": "15.3.0",
+          "versionEndExcluding": "15.3.6",
+          "matchCriteriaId": "83AF54D7-410D-42B4-853A-8A1973636542"
+         },
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:a:vercel:next.js:*:*:*:*:*:node.js:*:*",
+          "versionStartIncluding": "15.4.0",
+          "versionEndExcluding": "15.4.8",
+          "matchCriteriaId": "3D666EA7-BDAE-4E67-A331-B7403C3AA482"
+         },
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:a:vercel:next.js:*:*:*:*:*:node.js:*:*",
+          "versionStartIncluding": "15.5.0",
+          "versionEndExcluding": "15.5.7",
+          "matchCriteriaId": "E666ECDA-7A29-4D3D-AC40-357F044AD595"
+         },
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:a:vercel:next.js:*:*:*:*:*:node.js:*:*",
+          "versionStartIncluding": "16.0.0",
+          "versionEndExcluding": "16.0.7",
+          "matchCriteriaId": "CF65554E-4BF0-4344-AE7F-9E09E34E084F"
+         },
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:a:vercel:next.js:14.3.0:canary77:*:*:*:node.js:*:*",
+          "matchCriteriaId": "B209A306-CE1A-448D-8653-7627302399B7"
+         },
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:a:vercel:next.js:14.3.0:canary78:*:*:*:node.js:*:*",
+          "matchCriteriaId": "D1DCAC23-7ED0-456B-8AE2-57689199F708"
+         },
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:a:vercel:next.js:14.3.0:canary79:*:*:*:node.js:*:*",
+          "matchCriteriaId": "8B35D612-AC2A-4697-934F-372E4D5EE3F4"
+         },
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:a:vercel:next.js:14.3.0:canary80:*:*:*:node.js:*:*",
+          "matchCriteriaId": "A06D2291-5D89-4B76-99E0-52505634A63B"
+         },
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:a:vercel:next.js:14.3.0:canary81:*:*:*:node.js:*:*",
+          "matchCriteriaId": "8F01F07A-79F7-4F4B-8E3A-9C7D93C83A63"
+         },
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:a:vercel:next.js:14.3.0:canary82:*:*:*:node.js:*:*",
+          "matchCriteriaId": "9EDA2864-F94B-48EB-98F3-FDBFCECCC4A8"
+         },
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:a:vercel:next.js:14.3.0:canary83:*:*:*:node.js:*:*",
+          "matchCriteriaId": "4828BEE0-E891-491B-903D-A50B0E37273C"
+         },
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:a:vercel:next.js:14.3.0:canary84:*:*:*:node.js:*:*",
+          "matchCriteriaId": "55723BB4-E62B-4034-A434-485FE0E6BAF5"
+         },
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:a:vercel:next.js:14.3.0:canary85:*:*:*:node.js:*:*",
+          "matchCriteriaId": "19F55784-CC11-4024-9A42-EFEEF7B2366F"
+         },
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:a:vercel:next.js:14.3.0:canary86:*:*:*:node.js:*:*",
+          "matchCriteriaId": "1D694B0A-9BCF-49C8-A787-B0AFE51C7DC5"
+         },
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:a:vercel:next.js:14.3.0:canary87:*:*:*:node.js:*:*",
+          "matchCriteriaId": "C91F9508-E18D-4928-9DF5-DE2DDBEC56D3"
+         },
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:a:vercel:next.js:15.6.0:-:*:*:*:node.js:*:*",
+          "matchCriteriaId": "3ED7F693-8012-4F88-BC71-CF108E20664A"
+         },
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:a:vercel:next.js:15.6.0:canary0:*:*:*:node.js:*:*",
+          "matchCriteriaId": "40EE98AC-754A-4FD9-B51A-9E2674584FD9"
+         },
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:a:vercel:next.js:15.6.0:canary1:*:*:*:node.js:*:*",
+          "matchCriteriaId": "13B41C54-AF21-4637-A852-F997635B4E83"
+         },
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:a:vercel:next.js:15.6.0:canary10:*:*:*:node.js:*:*",
+          "matchCriteriaId": "91B41697-2D70-488D-A5C3-CB9D435560CA"
+         },
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:a:vercel:next.js:15.6.0:canary11:*:*:*:node.js:*:*",
+          "matchCriteriaId": "7D43DB84-7BCF-429B-849A-7189EC1922D0"
+         },
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:a:vercel:next.js:15.6.0:canary12:*:*:*:node.js:*:*",
+          "matchCriteriaId": "CEC2346B-8DBD-4D53-9866-CFBDD3AACEF2"
+         },
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:a:vercel:next.js:15.6.0:canary13:*:*:*:node.js:*:*",
+          "matchCriteriaId": "2BC95097-8CA6-42FE-98D7-F968E37C11B7"
+         },
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:a:vercel:next.js:15.6.0:canary14:*:*:*:node.js:*:*",
+          "matchCriteriaId": "4F8FA85C-1200-4FD2-B5D7-906300748BD4"
+         },
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:a:vercel:next.js:15.6.0:canary15:*:*:*:node.js:*:*",
+          "matchCriteriaId": "5D0B177B-2A31-48E9-81C7-1024E2452486"
+         },
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:a:vercel:next.js:15.6.0:canary16:*:*:*:node.js:*:*",
+          "matchCriteriaId": "7CCA01F3-3A14-4450-8A68-B1DA22C685B7"
+         },
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:a:vercel:next.js:15.6.0:canary17:*:*:*:node.js:*:*",
+          "matchCriteriaId": "1AB351AE-8C29-4E67-8699-0AAC6B3383E2"
+         },
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:a:vercel:next.js:15.6.0:canary18:*:*:*:node.js:*:*",
+          "matchCriteriaId": "14A34D9D-5FA2-434B-836E-3CE63D716CCB"
+         },
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:a:vercel:next.js:15.6.0:canary19:*:*:*:node.js:*:*",
+          "matchCriteriaId": "E8440F05-F32B-4D40-90B7-04BF22107D86"
+         },
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:a:vercel:next.js:15.6.0:canary2:*:*:*:node.js:*:*",
+          "matchCriteriaId": "FB6C6F6D-1EC0-4BD9-97A4-CFDE70DF0C43"
+         },
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:a:vercel:next.js:15.6.0:canary20:*:*:*:node.js:*:*",
+          "matchCriteriaId": "6189BD4C-A3E2-451B-96B2-FF01250E946D"
+         },
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:a:vercel:next.js:15.6.0:canary21:*:*:*:node.js:*:*",
+          "matchCriteriaId": "389EE453-8B07-45DD-BE9C-277C9C5CB156"
+         },
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:a:vercel:next.js:15.6.0:canary22:*:*:*:node.js:*:*",
+          "matchCriteriaId": "BA4D4638-4734-4B16-87AA-EF4B5D2DDD7A"
+         },
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:a:vercel:next.js:15.6.0:canary23:*:*:*:node.js:*:*",
+          "matchCriteriaId": "D54A2E63-6E0C-4E17-86A8-459B0A7EE00B"
+         },
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:a:vercel:next.js:15.6.0:canary24:*:*:*:node.js:*:*",
+          "matchCriteriaId": "E6136F0A-3010-4BAD-811B-D047CF5E6F64"
+         },
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:a:vercel:next.js:15.6.0:canary25:*:*:*:node.js:*:*",
+          "matchCriteriaId": "525EFA40-B14B-47E9-8FBD-45721A802DB6"
+         },
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:a:vercel:next.js:15.6.0:canary26:*:*:*:node.js:*:*",
+          "matchCriteriaId": "69142944-1EC0-4F94-862E-FA7F2E101101"
+         },
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:a:vercel:next.js:15.6.0:canary27:*:*:*:node.js:*:*",
+          "matchCriteriaId": "30016C06-372D-4F98-84A8-0732CA054970"
+         },
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:a:vercel:next.js:15.6.0:canary28:*:*:*:node.js:*:*",
+          "matchCriteriaId": "E1536E2B-84EC-46A3-9B6F-026364A9D927"
+         },
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:a:vercel:next.js:15.6.0:canary29:*:*:*:node.js:*:*",
+          "matchCriteriaId": "5E6F1F60-30E2-407C-8152-EEEB7EFE24CB"
+         },
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:a:vercel:next.js:15.6.0:canary3:*:*:*:node.js:*:*",
+          "matchCriteriaId": "3C907301-2C8F-465B-8134-94130E29F5DB"
+         },
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:a:vercel:next.js:15.6.0:canary30:*:*:*:node.js:*:*",
+          "matchCriteriaId": "E81C89FD-40CB-471E-9967-90ACDCF79373"
+         },
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:a:vercel:next.js:15.6.0:canary31:*:*:*:node.js:*:*",
+          "matchCriteriaId": "55E8AEEC-A686-49D6-B298-AEE4E838E769"
+         },
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:a:vercel:next.js:15.6.0:canary32:*:*:*:node.js:*:*",
+          "matchCriteriaId": "CB0618EC-6A0B-4AC3-BF6D-E51AC84C4E15"
+         },
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:a:vercel:next.js:15.6.0:canary33:*:*:*:node.js:*:*",
+          "matchCriteriaId": "7B27F133-8EB4-4761-A706-DF42D4EB55F6"
+         },
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:a:vercel:next.js:15.6.0:canary34:*:*:*:node.js:*:*",
+          "matchCriteriaId": "BF975472-B7E7-4AC8-B834-DA19897A4894"
+         },
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:a:vercel:next.js:15.6.0:canary35:*:*:*:node.js:*:*",
+          "matchCriteriaId": "48A82613-F3FD-4E89-8E4A-F3F05A616171"
+         },
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:a:vercel:next.js:15.6.0:canary36:*:*:*:node.js:*:*",
+          "matchCriteriaId": "0D42CA1F-7C21-47C1-8A9C-1015286FCBE2"
+         },
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:a:vercel:next.js:15.6.0:canary37:*:*:*:node.js:*:*",
+          "matchCriteriaId": "7C83A4EF-B96F-40EC-BA1F-FE1370AF78AC"
+         },
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:a:vercel:next.js:15.6.0:canary38:*:*:*:node.js:*:*",
+          "matchCriteriaId": "C151FDAB-DE34-4A7E-9762-6E99386798BF"
+         },
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:a:vercel:next.js:15.6.0:canary39:*:*:*:node.js:*:*",
+          "matchCriteriaId": "53025212-05F0-41FE-81F8-023B1784BB8C"
+         },
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:a:vercel:next.js:15.6.0:canary4:*:*:*:node.js:*:*",
+          "matchCriteriaId": "68EAC2B9-32A5-4721-BB35-16D519CD1BBC"
+         },
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:a:vercel:next.js:15.6.0:canary40:*:*:*:node.js:*:*",
+          "matchCriteriaId": "7411EF71-CBEB-4127-935F-3C732A1E22AC"
+         },
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:a:vercel:next.js:15.6.0:canary41:*:*:*:node.js:*:*",
+          "matchCriteriaId": "0C4B8930-1B65-4894-AFA8-C323AA7A8292"
+         },
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:a:vercel:next.js:15.6.0:canary42:*:*:*:node.js:*:*",
+          "matchCriteriaId": "B4977345-BD8C-41C7-9DD7-1E41D6CC6438"
+         },
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:a:vercel:next.js:15.6.0:canary43:*:*:*:node.js:*:*",
+          "matchCriteriaId": "EFE030A4-5B14-4C2D-B953-E80C98FB26EE"
+         },
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:a:vercel:next.js:15.6.0:canary44:*:*:*:node.js:*:*",
+          "matchCriteriaId": "9F616FD4-83BF-4A9A-AFFD-0D3E2544DC7E"
+         },
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:a:vercel:next.js:15.6.0:canary45:*:*:*:node.js:*:*",
+          "matchCriteriaId": "00512630-8B88-43B0-9ED3-2B33C64CC9A9"
+         },
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:a:vercel:next.js:15.6.0:canary46:*:*:*:node.js:*:*",
+          "matchCriteriaId": "A88EEF11-C7DA-4E2D-A030-FC177E696557"
+         },
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:a:vercel:next.js:15.6.0:canary47:*:*:*:node.js:*:*",
+          "matchCriteriaId": "BE8453D9-7275-4A5F-8732-F05662FFF2E8"
+         },
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:a:vercel:next.js:15.6.0:canary48:*:*:*:node.js:*:*",
+          "matchCriteriaId": "E306B896-9BBB-424B-8D99-7A1A79AEFE9D"
+         },
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:a:vercel:next.js:15.6.0:canary49:*:*:*:node.js:*:*",
+          "matchCriteriaId": "ACA87B86-33D5-4BEA-A13D-EEB4922D511E"
+         },
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:a:vercel:next.js:15.6.0:canary5:*:*:*:node.js:*:*",
+          "matchCriteriaId": "77AA0D23-B101-445C-A260-ED3152A93D17"
+         },
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:a:vercel:next.js:15.6.0:canary50:*:*:*:node.js:*:*",
+          "matchCriteriaId": "7D7DCCF7-FC83-4767-A0C2-C84A8B14F93B"
+         },
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:a:vercel:next.js:15.6.0:canary51:*:*:*:node.js:*:*",
+          "matchCriteriaId": "FD397568-7F1F-4153-AF08-B22D4D3B45F9"
+         },
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:a:vercel:next.js:15.6.0:canary52:*:*:*:node.js:*:*",
+          "matchCriteriaId": "984416EF-B121-40CE-B3AD-E22A06BB5844"
+         },
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:a:vercel:next.js:15.6.0:canary53:*:*:*:node.js:*:*",
+          "matchCriteriaId": "C4B58652-EE24-43CF-8ABE-4A01B2C9938C"
+         },
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:a:vercel:next.js:15.6.0:canary54:*:*:*:node.js:*:*",
+          "matchCriteriaId": "8090CF73-AEA7-43FC-A960-321BED3B1682"
+         },
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:a:vercel:next.js:15.6.0:canary55:*:*:*:node.js:*:*",
+          "matchCriteriaId": "823164E5-609D-4F24-86A5-E25618FE86A7"
+         },
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:a:vercel:next.js:15.6.0:canary56:*:*:*:node.js:*:*",
+          "matchCriteriaId": "E13CD688-63C3-4FFA-9D13-696005F0C155"
+         },
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:a:vercel:next.js:15.6.0:canary57:*:*:*:node.js:*:*",
+          "matchCriteriaId": "B397B18C-8A7A-4766-9A68-98B26E190A4A"
+         },
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:a:vercel:next.js:15.6.0:canary6:*:*:*:node.js:*:*",
+          "matchCriteriaId": "2DB345E3-BAD0-497E-93AE-5E4DC669C192"
+         },
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:a:vercel:next.js:15.6.0:canary7:*:*:*:node.js:*:*",
+          "matchCriteriaId": "840FEB19-2C66-4004-A488-B90219F8AC05"
+         },
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:a:vercel:next.js:15.6.0:canary8:*:*:*:node.js:*:*",
+          "matchCriteriaId": "C260F966-73D7-43F3-A329-8C558A695821"
+         },
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:a:vercel:next.js:15.6.0:canary9:*:*:*:node.js:*:*",
+          "matchCriteriaId": "28130A79-39B5-43E8-A690-C8E9C62483F8"
+         },
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:a:vercel:next.js:16.0.0:-:*:*:*:node.js:*:*",
+          "matchCriteriaId": "5E8548AB-D9E8-4E65-AF24-9F9021F99834"
+         }
+        ]
+       }
+      ]
+     }
+    ],
+    "references": [
+     {
+      "url": "https://react.dev/blog/2025/12/03/critical-security-vulnerability-in-react-server-components",
+      "source": "cve-assign@fb.com",
+      "tags": [
+       "Patch",
+       "Vendor Advisory"
+      ]
+     },
+     {
+      "url": "https://www.facebook.com/security/advisories/cve-2025-55182",
+      "source": "cve-assign@fb.com",
+      "tags": [
+       "Vendor Advisory"
+      ]
+     },
+     {
+      "url": "http://www.openwall.com/lists/oss-security/2025/12/03/4",
+      "source": "af854a3a-2127-422b-91ae-364da2661108",
+      "tags": [
+       "Mailing List",
+       "Patch",
+       "Third Party Advisory"
+      ]
+     },
+     {
+      "url": "https://news.ycombinator.com/item?id=46136026",
+      "source": "af854a3a-2127-422b-91ae-364da2661108",
+      "tags": [
+       "Issue Tracking"
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "cve": {
+    "id": "CVE-2021-21310",
+    "sourceIdentifier": "security-advisories@github.com",
+    "published": "2021-02-11T22:15:12.507",
+    "lastModified": "2026-06-17T03:35:16.087",
+    "vulnStatus": "Modified",
+    "cveTags": [],
+    "descriptions": [
+     {
+      "lang": "en",
+      "value": "NextAuth.js (next-auth) is am open source authentication solution for Next.js applications. In next-auth before version 3.3.0 there is a token verification vulnerability. Implementations using the Prisma database adapter in conjunction with the Email provider are impacted. Implementations using the Email provider with the default database adapter are not impacted. Implementations using the Prisma database adapter but not using the Email provider are not impacted. The Prisma database adapter was checking the verification token, but was not verifying the email address associated with that token. This made it possible to use a valid token to sign in as another user when using the Prima adapter in conjunction with the Email provider. This issue is specific to the community supported Prisma adapter. This issue is fixed in version 3.3.0."
+     }
+    ],
+    "affected": [
+     {
+      "source": "security-advisories@github.com",
+      "affectedData": [
+       {
+        "vendor": "nextauthjs",
+        "product": "next-auth",
+        "versions": [
+         {
+          "version": "< 3.3.0",
+          "status": "affected"
+         }
+        ]
+       }
+      ]
+     }
+    ],
+    "metrics": {
+     "cvssMetricV31": [
+      {
+       "source": "security-advisories@github.com",
+       "type": "Secondary",
+       "cvssData": {
+        "version": "3.1",
+        "vectorString": "CVSS:3.1/AV:N/AC:H/PR:N/UI:R/S:C/C:H/I:N/A:N",
+        "baseScore": 6.1,
+        "baseSeverity": "MEDIUM",
+        "attackVector": "NETWORK",
+        "attackComplexity": "HIGH",
+        "privilegesRequired": "NONE",
+        "userInteraction": "REQUIRED",
+        "scope": "CHANGED",
+        "confidentialityImpact": "HIGH",
+        "integrityImpact": "NONE",
+        "availabilityImpact": "NONE"
+       },
+       "exploitabilityScore": 1.6,
+       "impactScore": 4.0
+      },
+      {
+       "source": "nvd@nist.gov",
+       "type": "Primary",
+       "cvssData": {
+        "version": "3.1",
+        "vectorString": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:N/A:N",
+        "baseScore": 5.9,
+        "baseSeverity": "MEDIUM",
+        "attackVector": "NETWORK",
+        "attackComplexity": "HIGH",
+        "privilegesRequired": "NONE",
+        "userInteraction": "NONE",
+        "scope": "UNCHANGED",
+        "confidentialityImpact": "HIGH",
+        "integrityImpact": "NONE",
+        "availabilityImpact": "NONE"
+       },
+       "exploitabilityScore": 2.2,
+       "impactScore": 3.6
+      }
+     ],
+     "cvssMetricV2": [
+      {
+       "source": "nvd@nist.gov",
+       "type": "Primary",
+       "cvssData": {
+        "version": "2.0",
+        "vectorString": "AV:N/AC:M/Au:N/C:P/I:N/A:N",
+        "baseScore": 4.3,
+        "accessVector": "NETWORK",
+        "accessComplexity": "MEDIUM",
+        "authentication": "NONE",
+        "confidentialityImpact": "PARTIAL",
+        "integrityImpact": "NONE",
+        "availabilityImpact": "NONE"
+       },
+       "baseSeverity": "MEDIUM",
+       "exploitabilityScore": 8.6,
+       "impactScore": 2.9,
+       "acInsufInfo": false,
+       "obtainAllPrivilege": false,
+       "obtainUserPrivilege": false,
+       "obtainOtherPrivilege": false,
+       "userInteractionRequired": false
+      }
+     ]
+    },
+    "weaknesses": [
+     {
+      "source": "security-advisories@github.com",
+      "type": "Secondary",
+      "description": [
+       {
+        "lang": "en",
+        "value": "CWE-290"
+       }
+      ]
+     }
+    ],
+    "configurations": [
+     {
+      "nodes": [
+       {
+        "operator": "OR",
+        "negate": false,
+        "cpeMatch": [
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:a:nextauth.js:next-auth:*:*:*:*:*:node.js:*:*",
+          "versionEndExcluding": "3.3.0",
+          "matchCriteriaId": "33AEB592-BAC1-4FE4-84E0-C8F9E95BF8E5"
+         }
+        ]
+       }
+      ]
+     }
+    ],
+    "references": [
+     {
+      "url": "https://github.com/nextauthjs/next-auth/releases/tag/v3.3.0",
+      "source": "security-advisories@github.com",
+      "tags": [
+       "Third Party Advisory"
+      ]
+     },
+     {
+      "url": "https://github.com/nextauthjs/next-auth/security/advisories/GHSA-pg53-56cg-4m8q",
+      "source": "security-advisories@github.com",
+      "tags": [
+       "Exploit",
+       "Third Party Advisory"
+      ]
+     },
+     {
+      "url": "https://www.npmjs.com/package/next-auth",
+      "source": "security-advisories@github.com",
+      "tags": [
+       "Product",
+       "Third Party Advisory"
+      ]
+     },
+     {
+      "url": "https://github.com/nextauthjs/next-auth/releases/tag/v3.3.0",
+      "source": "af854a3a-2127-422b-91ae-364da2661108",
+      "tags": [
+       "Third Party Advisory"
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "cve": {
+    "id": "CVE-2099-0001",
+    "sourceIdentifier": "security-advisories@github.com",
+    "published": "2025-01-03T21:15:13.550",
+    "lastModified": "2026-06-17T08:12:03.743",
+    "vulnStatus": "Rejected",
+    "cveTags": [],
+    "descriptions": [
+     {
+      "lang": "en",
+      "value": "Next.js is a React framework for building full-stack web applications. Starting in version 13.0.0 and prior to versions 13.5.8, 14.2.21, and 15.1.2, Next.js is vulnerable to a Denial of Service (DoS) attack that allows attackers to construct requests that leaves requests to Server Actions hanging until the hosting provider cancels the function execution. This vulnerability can also be used as a Denial of Wallet (DoW) attack when deployed in providers billing by response times. (Note: Next.js server is idle during that time and only keeps the connection open. CPU and memory footprint are low during that time.). Deployments without any protection against long running Server Action invocations are especially vulnerable. Hosting providers like Vercel or Netlify set a default maximum duration on function execution to reduce the risk of excessive billing. This is the same issue as if the incoming HTTP request has an invalid `Content-Length` header or never closes. If the host has no other mitigations to those then this vulnerability is novel. This vulnerability affects only Next.js deployments using Server Actions. The issue was resolved in Next.js 13.5.8, 14.2.21, and 15.1.2. We recommend that users upgrade to a safe version. There are no official workarounds."
+     }
+    ],
+    "affected": [
+     {
+      "source": "security-advisories@github.com",
+      "affectedData": [
+       {
+        "vendor": "vercel",
+        "product": "next.js",
+        "versions": [
+         {
+          "version": ">= 13.0.0, < 13.5.8",
+          "status": "affected"
+         },
+         {
+          "version": ">= 14.0.0, < 14.2.21",
+          "status": "affected"
+         },
+         {
+          "version": ">= 15.0.0, < 15.1.2",
+          "status": "affected"
+         }
+        ]
+       }
+      ]
+     }
+    ],
+    "metrics": {
+     "cvssMetricV31": [
+      {
+       "source": "security-advisories@github.com",
+       "type": "Secondary",
+       "cvssData": {
+        "version": "3.1",
+        "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:L",
+        "baseScore": 5.3,
+        "baseSeverity": "MEDIUM",
+        "attackVector": "NETWORK",
+        "attackComplexity": "LOW",
+        "privilegesRequired": "NONE",
+        "userInteraction": "NONE",
+        "scope": "UNCHANGED",
+        "confidentialityImpact": "NONE",
+        "integrityImpact": "NONE",
+        "availabilityImpact": "LOW"
+       },
+       "exploitabilityScore": 3.9,
+       "impactScore": 1.4
+      }
+     ],
+     "ssvcV203": [
+      {
+       "source": "134c704f-9b21-4f2e-91b3-4a467353bcc0",
+       "ssvcData": {
+        "timestamp": "2025-01-03T20:50:53.098540Z",
+        "id": "CVE-2024-56332",
+        "options": [
+         {
+          "exploitation": "none"
+         },
+         {
+          "automatable": "no"
+         },
+         {
+          "technicalImpact": "partial"
+         }
+        ],
+        "role": "CISA Coordinator",
+        "version": "2.0.3"
+       }
+      }
+     ]
+    },
+    "weaknesses": [
+     {
+      "source": "security-advisories@github.com",
+      "type": "Secondary",
+      "description": [
+       {
+        "lang": "en",
+        "value": "CWE-770"
+       }
+      ]
+     }
+    ],
+    "configurations": [
+     {
+      "nodes": [
+       {
+        "operator": "OR",
+        "negate": false,
+        "cpeMatch": [
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:a:vercel:next.js:*:*:*:*:*:node.js:*:*",
+          "versionStartIncluding": "13.0.0",
+          "versionEndExcluding": "13.5.8",
+          "matchCriteriaId": "E7196D78-BDDA-4939-B9E0-89BCDA3C64C9"
+         },
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:a:vercel:next.js:*:*:*:*:*:node.js:*:*",
+          "versionStartIncluding": "14.0.0",
+          "versionEndExcluding": "14.2.21",
+          "matchCriteriaId": "D3BE3E65-BCF1-45DE-8154-E7FE187EB497"
+         },
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:a:vercel:next.js:*:*:*:*:*:node.js:*:*",
+          "versionStartIncluding": "15.0.0",
+          "versionEndExcluding": "15.1.2",
+          "matchCriteriaId": "432A4401-5564-4D0B-82BD-11322EA7FEDF"
+         }
+        ]
+       }
+      ]
+     }
+    ],
+    "references": [
+     {
+      "url": "https://github.com/vercel/next.js/security/advisories/GHSA-7m27-7ghc-44w9",
+      "source": "security-advisories@github.com",
+      "tags": [
+       "Vendor Advisory"
+      ]
+     }
+    ]
+   }
+  }
+ ]
+}

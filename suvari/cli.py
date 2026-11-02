@@ -323,6 +323,8 @@ def auto(
     rate_per_min: Optional[int] = typer.Option(None, "--rate", help="Max requests per minute, global across targets (default 60)"),
     allow_host: List[str] = typer.Option([], "--allow-host", help="Extra in-scope host(s)"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Deterministic engine, no LLM"),
+    research: Optional[str] = typer.Option(None, "--research", help="Known-CVE research for detected tech: on|off (default on)"),
+    research_cache_ttl: Optional[int] = typer.Option(None, "--research-cache-ttl", help="Research cache TTL in seconds (default 86400)"),
 ):
     """Autonomous probability-driven scan — multi-target, resumable jobs"""
     from .auto.jobs import JobManager
@@ -334,6 +336,10 @@ def auto(
 
     banner()
     provider, model = _resolve_provider(provider, model)
+    if research is not None and research.lower() not in ("on", "off"):
+        console.print("[red]--research must be 'on' or 'off'.[/red]")
+        raise typer.Exit(2)
+    research_cfg = _research_config(research, research_cache_ttl)
 
     # Legacy single-workspace engine: kept verbatim for `--output` users.
     if output is not None:
@@ -342,7 +348,7 @@ def auto(
             raise typer.Exit(2)
         _auto_legacy(url, output, provider, model, max_steps, time_budget,
                      rate_per_min or 60, allow_host, resume is not None, dry_run,
-                     max_tokens=max_tokens)
+                     max_tokens=max_tokens, research_cfg=research_cfg)
         return
 
     from .auto.jobs import parse_duration
@@ -376,6 +382,8 @@ def auto(
                      ("rate_per_min", rate_per_min)):
             if v is not None:
                 job.budget[k] = v
+        if research is not None or research_cache_ttl is not None:
+            job.engine["research"] = research_cfg
         manager.save(job)
     else:
         specs = ([url] if url else []) + [*target]
@@ -393,13 +401,27 @@ def auto(
                 max_requests=max_requests, max_tokens=max_tokens,
                 max_steps=max_steps, rate_per_min=rate_per_min or 60,
                 concurrency=concurrency or 1, dry_run=dry_run,
-                provider=provider, model=model,
+                provider=provider, model=model, research=research_cfg,
             )
         except (ScopeError, OSError) as e:
             console.print(f"[red][ERR] scope: {e}[/red]")
             raise typer.Exit(2)
 
     _run_job(manager, job)
+
+
+def _research_config(flag: Optional[str], ttl: Optional[int]) -> dict:
+    """Merge ``--research``/``--research-cache-ttl`` over config ``research:``."""
+    from .auto.research import DEFAULT_SOURCES, DEFAULT_TTL
+
+    cfg = dict(load_config().get("research") or {})
+    enabled = cfg.get("enabled", True) if flag is None else flag.lower() == "on"
+    return {
+        "enabled": bool(enabled),
+        "cache_ttl": ttl if ttl is not None else cfg.get("cache_ttl", DEFAULT_TTL),
+        "sources": [*(cfg.get("sources") or DEFAULT_SOURCES)],
+        "max_results": int(cfg.get("max_results", 20)),
+    }
 
 
 def _run_job(manager, job) -> None:
@@ -429,7 +451,11 @@ def _run_job(manager, job) -> None:
         + (format_duration(b["duration"]) if b.get("duration") else "no time limit")
         + f" / {b.get('max_requests') or '∞'} requests / {b.get('max_tokens') or '∞'} tokens"
         + f" · {b.get('max_steps')} steps per target · concurrency {b.get('concurrency')}"
-        + f" · {b.get('rate_per_min')} req/min global · safe mode (GET only)[/dim]\n")
+        + f" · {b.get('rate_per_min')} req/min global · safe mode (GET only)[/dim]")
+    rcfg = eng.get("research") or {}
+    console.print("[dim]research: "
+                  + (f"on ({', '.join(rcfg.get('sources', []))}; cache ttl {rcfg.get('cache_ttl')}s)"
+                     if rcfg.get("enabled") else "off") + "[/dim]\n")
 
     def on_event(kind: str, msg: str) -> None:
         style = {"stop": "yellow", "target-skip": "yellow", "target-error": "red",
@@ -453,6 +479,8 @@ def _run_job(manager, job) -> None:
     for t in result["targets"]:
         console.print(f"  - {t['url']}: {t['status']} ({t['turns']} turns, "
                       f"{t['findings']} findings)")
+    if c.get("research_requests"):
+        console.print(f"  research intel requests: {c['research_requests']}")
     console.print(f"[bold][DOC] Report:[/bold] {result['report']}")
     if result["status"] != "done":
         console.print(f"[yellow]Resume where it left off: "
@@ -487,7 +515,7 @@ def _print_jobs(manager) -> None:
 
 def _auto_legacy(url, output, provider, model, max_steps, time_budget,
                  rate_per_min, allow_host, resume, dry_run,
-                 max_tokens=None) -> None:
+                 max_tokens=None, research_cfg=None) -> None:
     """Original single-target engine writing into one workspace directory."""
     from .auto.session import run_auto
 
@@ -505,6 +533,7 @@ def _auto_legacy(url, output, provider, model, max_steps, time_budget,
             max_steps=max_steps, time_budget=time_budget, max_tokens=max_tokens,
             rate_per_min=rate_per_min,
             resume=resume, dry_run=dry_run, allow_hosts=allow_host,
+            researcher=_build_researcher(research_cfg),
         )
     except RuntimeError as e:
         console.print(f"[red][ERR] {e}[/red]")
@@ -518,6 +547,10 @@ def _auto_legacy(url, output, provider, model, max_steps, time_budget,
         n_tech = sum(1 for h in result.get("hypotheses", [])
                      if str(h.get("rationale", "")).startswith("tech-aware"))
         console.print(f"[dim]detected: {', '.join(tech)} · {n_tech} tech-aware vectors[/dim]")
+    r = result.get("research")
+    if r:
+        console.print(f"[dim]research: {r['found']} CVEs, {r['applicable']} applicable, "
+                      f"{r['tested']} tested, {r['verified']} verified[/dim]")
     for f in findings:
         console.print(f"  [[{f['severity']}]] {f['title']} — {f['target']}  [dim]{f['evidence']}[/dim]")
     console.print(f"[bold][DOC] Report:[/bold] {result['report']}")
@@ -527,6 +560,13 @@ def _auto_legacy(url, output, provider, model, max_steps, time_budget,
         (Path("output") / ".last").write_text(str(root))
     except Exception:
         pass
+
+
+def _build_researcher(cfg: Optional[dict]):
+    if not cfg or not cfg.get("enabled"):
+        return None
+    from .auto.research import from_config
+    return from_config(cfg)
 
 
 def normalize_auto_argv(argv: list[str]) -> list[str]:

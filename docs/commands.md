@@ -61,6 +61,53 @@ python suvari.py attack ./output/20260101_120000_example_com/
 
 Reads `findings.json` from a previous scan and runs targeted exploitation (sqlmap, hydra, etc.) on confirmed vulnerabilities.
 
+## `auto` — Autonomous Probability-Driven Scan
+
+```bash
+python suvari.py auto --target https://example.com
+```
+
+Seeds hypotheses, tests the most probable one each turn (read-only GET probes),
+updates probabilities from the evidence, and writes a report with a decision log.
+Jobs are resumable (`--resume <job-id>`, `--jobs`).
+
+### Known-vulnerability research
+
+After fingerprinting the stack, the loop looks up publicly known CVEs for each
+detected technology. It scores how plausibly each CVE applies to *this* target,
+then tests the plausible ones with harmless checks.
+
+- **Sources** (keyless, GET only): NVD API 2.0 (by CPE where known, otherwise by
+  keyword; newest records), CISA KEV (sets the exploited-in-the-wild flag), and
+  optionally the GitHub Advisory DB.
+- **Applicability score (0–1)** is built from these signals: version in the
+  affected range, product match, affected component seen on the target
+  (e.g. `/_next/image`), authentication required, KEV (+0.3), CVSS ≥ 7 (+0.2)
+  and a public exploit reference (+0.15). A known version outside every affected
+  range caps the score at 0.05.
+- **Tests** are payload-free GETs only: version fingerprint (banner or error
+  page), component reachability, missing mitigating header, and plain file
+  exposure. Nothing is exploited, and DoS-class CVEs are verified by version only.
+- **Caching and limits:** results are cached in `~/.cache/suvari/research/`
+  (TTL 24h). NVD is limited to 5 requests per 30 s and GitHub to 60 per hour,
+  with at most 60 intel requests per job. With no network, a stale cache is used;
+  if there is none, research is empty and the scan continues.
+- The report gets a **Research** section, for example
+  `CVE-XXXX-YYYY (CVSS 9.8, KEV) score 0.90 → tested: version-fingerprint: VERIFIED — …`.
+
+| Flag | Description |
+|------|-------------|
+| `--research on\|off` | Known-CVE research (default `on`) |
+| `--research-cache-ttl N` | Research cache TTL in seconds (default 86400) |
+
+Defaults can be set in `~/.config/suvari/config.json`:
+
+```json
+{"research": {"enabled": true, "sources": ["nvd", "kev"], "max_results": 20, "cache_ttl": 86400}}
+```
+
+`sources` may also include `"ghsa"`.
+
 ## `bb` — Bug Bounty Recon
 
 ```bash

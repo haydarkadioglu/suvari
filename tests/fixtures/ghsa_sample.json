@@ -1,0 +1,206 @@
+[
+ {
+  "ghsa_id": "GHSA-673q-mjm6-r5xr",
+  "cve_id": null,
+  "url": "https://api.github.com/advisories/GHSA-673q-mjm6-r5xr",
+  "html_url": "https://github.com/advisories/GHSA-673q-mjm6-r5xr",
+  "summary": "Next.js: Unauthenticated Remote Code Execution in `use cache` functions returning typed arrays",
+  "description": "## Impact\n\nA vulnerability in applications using App router with Cache Component can lead to remote code execution. The application needs to have a `use cache` function that returns multiple typed arrays.\n\n## Workaround\n\nThere is no known workaround for affected applications with such `use cache` functions. You should upgrade immediately even if your application does not have similar functions.",
+  "type": "reviewed",
+  "severity": "critical",
+  "repository_advisory_url": "https://api.github.com/repos/vercel/next.js/security-advisories/GHSA-673q-mjm6-r5xr",
+  "source_code_location": "https://github.com/vercel/next.js",
+  "identifiers": [
+   {
+    "value": "GHSA-673q-mjm6-r5xr",
+    "type": "GHSA"
+   }
+  ],
+  "references": [
+   "https://github.com/vercel/next.js/security/advisories/GHSA-673q-mjm6-r5xr",
+   "https://github.com/vercel/next.js/commit/a4cea6aec5da89d116b8960e113189cf51745d2f",
+   "https://github.com/vercel/next.js/releases/tag/v16.4.1",
+   "https://github.com/advisories/GHSA-673q-mjm6-r5xr"
+  ],
+  "published_at": "2026-10-22T16:42:31Z",
+  "updated_at": "2026-10-22T16:42:32Z",
+  "github_reviewed_at": "2026-10-22T16:42:31Z",
+  "nvd_published_at": null,
+  "withdrawn_at": null,
+  "vulnerabilities": [
+   {
+    "package": {
+     "ecosystem": "npm",
+     "name": "next"
+    },
+    "vulnerable_version_range": ">= 16.0.0, <= 16.4.0",
+    "first_patched_version": "16.4.1",
+    "vulnerable_functions": []
+   }
+  ],
+  "cvss_severities": {
+   "cvss_v3": {
+    "vector_string": null,
+    "score": 0.0
+   },
+   "cvss_v4": {
+    "vector_string": "CVSS:4.0/AV:N/AC:L/AT:P/PR:N/UI:N/VC:H/VI:H/VA:H/SC:H/SI:H/SA:N",
+    "score": 9.5
+   }
+  },
+  "cwes": [
+   {
+    "cwe_id": "CWE-502",
+    "name": "Deserialization of Untrusted Data"
+   }
+  ],
+  "comments": 0,
+  "cvss": {
+   "vector_string": null,
+   "score": null
+  }
+ },
+ {
+  "ghsa_id": "GHSA-h694-7cp9-m8p3",
+  "cve_id": "CVE-2026-103004",
+  "url": "https://api.github.com/advisories/GHSA-h694-7cp9-m8p3",
+  "html_url": "https://github.com/advisories/GHSA-h694-7cp9-m8p3",
+  "summary": "next.js cache leak across root param values in nested 'use cache' functions",
+  "description": "### Impact\n\nWith Cache Components enabled (`cacheComponents: true`), a `'use cache'` function that calls another `'use cache'` function that reads a root param can be keyed incorrectly when the inner call is served from an existing entry: the enclosing function's cache key then omits that root param. The enclosing entry is written once and reused for all root param values, so a response for one root param value can serve content produced for a different value \u2014 whether the page is prerendered at build time or at runtime, or rendered dynamically. Shared cache headers let downstream caches redistribute the content further. \n\nWhat values are leaked cannot be attacker controlled. Which value's content is served depends only on which invocation wrote the entry first.\n\n### Workarounds\n\nThere are no known workarounds. Apps should upgrade to the patched version as soon as possible.",
+  "type": "reviewed",
+  "severity": "medium",
+  "repository_advisory_url": "https://api.github.com/repos/vercel/next.js/security-advisories/GHSA-h694-7cp9-m8p3",
+  "source_code_location": "https://github.com/vercel/next.js",
+  "identifiers": [
+   {
+    "value": "GHSA-h694-7cp9-m8p3",
+    "type": "GHSA"
+   },
+   {
+    "value": "CVE-2026-103004",
+    "type": "CVE"
+   }
+  ],
+  "references": [
+   "https://github.com/vercel/next.js/security/advisories/GHSA-h694-7cp9-m8p3",
+   "https://nvd.nist.gov/vuln/detail/CVE-2026-103004",
+   "https://github.com/vercel/next.js/commit/e92db4536a7f34ae2dbda583cfa1b4e0d06d1865",
+   "https://github.com/vercel/next.js/releases/tag/v16.3.8",
+   "https://github.com/advisories/GHSA-h694-7cp9-m8p3"
+  ],
+  "published_at": "2026-10-22T16:08:40Z",
+  "updated_at": "2026-10-22T16:08:41Z",
+  "github_reviewed_at": "2026-10-22T16:08:40Z",
+  "nvd_published_at": "2026-10-01T15:17:25Z",
+  "withdrawn_at": null,
+  "vulnerabilities": [
+   {
+    "package": {
+     "ecosystem": "npm",
+     "name": "next"
+    },
+    "vulnerable_version_range": ">= 16.3.0, < 16.3.8",
+    "first_patched_version": "16.3.8",
+    "vulnerable_functions": []
+   }
+  ],
+  "cvss_severities": {
+   "cvss_v3": {
+    "vector_string": null,
+    "score": 0.0
+   },
+   "cvss_v4": {
+    "vector_string": "CVSS:4.0/AV:N/AC:L/AT:P/PR:N/UI:N/VC:L/VI:N/VA:N/SC:N/SI:N/SA:N",
+    "score": 6.3
+   }
+  },
+  "cwes": [
+   {
+    "cwe_id": "CWE-524",
+    "name": "Use of Cache Containing Sensitive Information"
+   }
+  ],
+  "comments": 1,
+  "cvss": {
+   "vector_string": null,
+   "score": null
+  },
+  "epss": {
+   "percentage": 0.0025,
+   "percentile": 0.16183
+  }
+ },
+ {
+  "ghsa_id": "GHSA-2464-fhr4-w9xw",
+  "cve_id": null,
+  "url": "https://api.github.com/advisories/GHSA-2464-fhr4-w9xw",
+  "html_url": "https://github.com/advisories/GHSA-2464-fhr4-w9xw",
+  "summary": "Next.js: Unauthenticated Remote Code Execution in Image Optimization API when SVG files are used",
+  "description": "## Impact\n\nA memory-related vulnerability has been discovered in an upstream library used for Image Optimization can lead to possible remote code execution (RCE) when Next.js runs on glibc-based Linux.\n\n## Workaround\n\nEnsure the version of `sharp` used by Next.js is greater than or equal to `0.35.5`. Fresh installs automatically get a fixed version of `sharp`.\nUpgrading Next.js to the patched versions will ensure package managers automatically provide a fixed version of `sharp` to Next.js.",
+  "type": "reviewed",
+  "severity": "critical",
+  "repository_advisory_url": "https://api.github.com/repos/vercel/next.js/security-advisories/GHSA-2464-fhr4-w9xw",
+  "source_code_location": "https://github.com/vercel/next.js",
+  "identifiers": [
+   {
+    "value": "GHSA-2464-fhr4-w9xw",
+    "type": "GHSA"
+   }
+  ],
+  "references": [
+   "https://github.com/vercel/next.js/security/advisories/GHSA-2464-fhr4-w9xw",
+   "https://nvd.nist.gov/vuln/detail/CVE-2026-96889",
+   "https://github.com/vercel/next.js/commit/5e3b687b5edb868b064bdc058d768a7021e7f6ad",
+   "https://github.com/vercel/next.js/commit/9571ec899f063df6533351bec390ccb2cc0af6a3",
+   "https://github.com/vercel/next.js/releases/tag/v15.5.28",
+   "https://github.com/vercel/next.js/releases/tag/v16.4.1",
+   "https://github.com/advisories/GHSA-2464-fhr4-w9xw"
+  ],
+  "published_at": "2026-10-22T15:52:53Z",
+  "updated_at": "2026-10-22T15:52:56Z",
+  "github_reviewed_at": "2026-10-22T15:52:53Z",
+  "nvd_published_at": null,
+  "withdrawn_at": null,
+  "vulnerabilities": [
+   {
+    "package": {
+     "ecosystem": "npm",
+     "name": "next"
+    },
+    "vulnerable_version_range": ">= 10.0.0, <= 15.5.27",
+    "first_patched_version": "15.5.28",
+    "vulnerable_functions": []
+   },
+   {
+    "package": {
+     "ecosystem": "npm",
+     "name": "next"
+    },
+    "vulnerable_version_range": ">= 16.0.0, <= 16.4.0",
+    "first_patched_version": "16.4.1",
+    "vulnerable_functions": []
+   }
+  ],
+  "cvss_severities": {
+   "cvss_v3": {
+    "vector_string": null,
+    "score": 0.0
+   },
+   "cvss_v4": {
+    "vector_string": "CVSS:4.0/AV:N/AC:L/AT:P/PR:N/UI:N/VC:H/VI:H/VA:H/SC:H/SI:H/SA:H",
+    "score": 9.5
+   }
+  },
+  "cwes": [
+   {
+    "cwe_id": "CWE-1395",
+    "name": "Dependency on Vulnerable Third-Party Component"
+   }
+  ],
+  "comments": 0,
+  "cvss": {
+   "vector_string": null,
+   "score": null
+  }
+ }
+]

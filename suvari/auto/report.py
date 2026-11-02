@@ -66,7 +66,17 @@ _RECS = {
     "dotenv-exposure": "Remove the `.env` file from the web root immediately and "
                        "rotate any leaked secrets.",
     "server-status": "Restrict `/server-status` (mod_status) to localhost/trusted IPs.",
+    # research-derived (known CVE) checks
+    "cve-version-check": "Upgrade the component to a release outside the CVE's affected "
+                         "range (see the advisory references in the Research section).",
+    "cve-surface": "The component a known CVE targets is exposed; verify its version "
+                   "and upgrade, or disable the component if unused.",
+    "cve-mitigation-header": "Add the missing security header; it limits the impact of "
+                             "the related known CVE class.",
+    "cve-file-exposure": "Block public access to the file named in the advisory.",
 }
+
+APPLICABLE = 0.35  # mirrors reasoning.APPLICABLE_THRESHOLD
 
 
 def write_report(state: ScanState, result: dict) -> Path:
@@ -125,6 +135,7 @@ def write_report(state: ScanState, result: dict) -> Path:
     a("")
 
     lines += _findings_section(findings, "##")
+    lines += _research_section(state, "##")
     lines += _decision_log_section(state, "##")
     lines += _tried_section(state, "##")
     lines += _recommendations_section(findings, "##")
@@ -160,6 +171,95 @@ def _findings_section(findings: list[dict], h: str) -> list[str]:
     return lines
 
 
+def research_stats(state: ScanState) -> dict:
+    """Counts for the Research section and CLI summary."""
+    cands = (state.research or {}).get("candidates", [])
+    tested = [c for c in cands if c.get("results")]
+    return {
+        "found": len(cands),
+        "applicable": sum(1 for c in cands if c["score"] >= APPLICABLE),
+        "tested": len(tested),
+        "verified": sum(1 for c in tested if any(
+            r["positive"] and r["kind"] == "version-fingerprint" for r in c["results"])),
+        "surface": sum(1 for c in tested if any(
+            r["positive"] and r["kind"] != "version-fingerprint" for r in c["results"])),
+        "ruled_out": sum(1 for c in tested if any(
+            not r["positive"] and not r["inconclusive"] and r["kind"] == "version-fingerprint"
+            for r in c["results"])),
+    }
+
+
+def _cve_tags(c: dict) -> str:
+    tags = [f"CVSS {c['cvss']}" if c.get("cvss") is not None else "CVSS n/a"]
+    if c.get("kev"):
+        tags.append("KEV")
+    return ", ".join(tags)
+
+
+def _cve_outcome(c: dict) -> str:
+    res = c.get("results") or []
+    if not res:
+        if c["score"] < APPLICABLE:
+            return "not tested (below applicability threshold)"
+        if not c.get("hypotheses"):
+            return "not tested (not seeded)"
+        return "not tested (step budget ran out first)"
+    parts = []
+    for r in res:
+        if r["inconclusive"]:
+            verdict = "inconclusive"
+        elif r["positive"]:
+            verdict = "VERIFIED" if r["kind"] == "version-fingerprint" else "surface present"
+        else:
+            verdict = "ruled out" if r["kind"] == "version-fingerprint" else "negative"
+        parts.append(f"{r['kind']}: {verdict} — {r['detail']}")
+    return "tested: " + "; ".join(parts)
+
+
+def _research_section(state: ScanState, h: str) -> list[str]:
+    rs = state.research or {}
+    if not rs.get("enabled"):
+        return []
+    lines = [f"{h} Research", ""]
+    a = lines.append
+    for t in rs.get("techs", []):
+        src = "cache (stale, offline)" if t.get("stale") else (
+            "cache" if t.get("from_cache") else "live")
+        a(f"- `{t['tech']}` version {t.get('version') or 'unknown'}: "
+          f"{t.get('total_found', 0)} matching records, {t.get('returned', 0)} newest analysed, "
+          f"{t.get('kev', 0)} in CISA KEV · source: {src}"
+          + (f" · query `{t['query']}`" if t.get("query") else "")
+          + (f" · observed components: {', '.join(t['features'])}" if t.get("features") else "")
+          + (f" · error: {t['error']}" if t.get("error") else ""))
+    if not rs.get("techs"):
+        a("- No researchable technology detected.")
+    st = research_stats(state)
+    a(f"- CVEs found: {st['found']} · scored applicable (≥{APPLICABLE}): {st['applicable']} "
+      f"· tested: {st['tested']} · verified (version in affected range): {st['verified']} "
+      f"· ruled out by version: {st['ruled_out']} · attack surface present: {st['surface']}")
+    a("")
+    cands = sorted(rs.get("candidates", []), key=lambda c: -c["score"])
+    shown = [c for c in cands if c.get("results") or c["score"] >= APPLICABLE] or cands[:5]
+    for c in shown[:15]:
+        a(f"- **{c['cve']}** ({_cve_tags(c)}) score {c['score']:.2f} → {_cve_outcome(c)}")
+        a(f"  - why: {c['why']}")
+    if len(cands) > len(shown[:15]):
+        rest = cands[len(shown[:15]):]
+        a("")
+        a(f"<details><summary>{len(rest)} lower-scored CVEs</summary>")
+        a("")
+        a("| CVE | CVSS | KEV | Score | Why |")
+        a("|-----|-----:|:---:|------:|-----|")
+        for c in rest:
+            a(f"| {c['cve']} | {c.get('cvss') if c.get('cvss') is not None else '-'} "
+              f"| {'Y' if c.get('kev') else ''} | {c['score']:.2f} "
+              f"| {c['why'].replace('|', '/')[:140]} |")
+        a("")
+        a("</details>")
+    a("")
+    return lines
+
+
 def _decision_log_section(state: ScanState, h: str) -> list[str]:
     lines = [f"{h} Decision log", "",
              "| Turn | Hypothesis | Prior | Post→ | Source | Result (L) | + | Action |",
@@ -168,9 +268,10 @@ def _decision_log_section(state: ScanState, h: str) -> list[str]:
         pb = d.get("posterior_before")
         pa = d.get("posterior_after")
         trans = f"{pb}→{pa}" if pb is not None else "-"
+        src = d["source"] + ("/research" if d.get("origin") == "research" else "")
         lines.append(
             f"| {d['turn']} | {d['hypothesis']} | {d.get('prior','-')} | {trans} "
-            f"| {d['source']} | {d.get('result_class','-')} "
+            f"| {src} | {d.get('result_class','-')} "
             f"| {'Y' if d.get('positive') else 'n'} | `{d['action']}` |")
     lines.append("")
     return lines
@@ -276,6 +377,7 @@ def write_job_report(job, job_dir: Path, final: bool = False) -> Path:
         a("")
         findings = _sorted_findings(st)
         lines += _findings_section(findings, "###")
+        lines += _research_section(st, "###")
         lines += _decision_log_section(st, "###")
         lines += _tried_section(st, "###")
         lines += _notes_section(st, "###")
@@ -322,6 +424,12 @@ def write_job_report(job, job_dir: Path, final: bool = False) -> Path:
     a(f"- LLM usage: {c.get('llm_calls', 0)} calls, ~{c.get('llm_tokens', 0)} tokens"
       + (f" / budget {job.budget['max_tokens']}" if job.budget.get("max_tokens") else ""))
     a(f"- Blocked by scope: {len(job.blocked)}")
+    if (job.engine.get("research") or {}).get("enabled"):
+        rs = [research_stats(st) for st in states.values()]
+        a(f"- Research: {sum(r['found'] for r in rs)} CVEs found, "
+          f"{sum(r['applicable'] for r in rs)} applicable, {sum(r['tested'] for r in rs)} tested, "
+          f"{sum(r['verified'] for r in rs)} verified · "
+          f"{c.get('research_requests', 0)} intel requests")
     a("")
 
     out.parent.mkdir(parents=True, exist_ok=True)
