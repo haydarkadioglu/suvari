@@ -298,40 +298,201 @@ Info: whatweb, wafw00f, curl | Crack: john, hashcat | OSINT: amass, theharvester
     console.print(f"\n[green]Attack complete.[/green] [dim]{ws.path}[/dim]")
 
 
+RESUME_LATEST = "latest"
+
+
 @app.command()
 def auto(
-    url: str = typer.Argument(..., help="Target URL (e.g. https://example.com)"),
-    output: Optional[Path] = typer.Option(None, "--output", "-o", help="Workspace directory"),
+    url: Optional[str] = typer.Argument(None, help="Target URL (single-target shorthand for --target)"),
+    target: List[str] = typer.Option([], "--target", "-t", help="Target: URL, host:port, IP, CIDR or IP range (repeatable)"),
+    targets_file: Optional[Path] = typer.Option(None, "--targets", help="File with one target per line"),
+    scope_file: Optional[Path] = typer.Option(None, "--scope-file", help="Explicit scope allowlist file (default: the targets themselves)"),
+    allow_large_scope: bool = typer.Option(False, "--allow-large-scope", help="Permit networks/ranges wider than a /24"),
+    duration: Optional[str] = typer.Option(None, "--duration", help="Job time budget, e.g. 30m, 2h (default: --time-budget)"),
+    max_requests: Optional[int] = typer.Option(None, "--max-requests", help="Total request budget for the job"),
+    max_tokens: Optional[int] = typer.Option(None, "--max-tokens", help="Total LLM token budget for the job"),
+    concurrency: Optional[int] = typer.Option(None, "--concurrency", help="Targets scanned in parallel (default 1)"),
+    resume: Optional[str] = typer.Option(None, "--resume", help="Resume a job by id (bare --resume: most recent unfinished job)"),
+    jobs: bool = typer.Option(False, "--jobs", help="List jobs and exit"),
+    jobs_dir: Path = typer.Option(Path("output") / "jobs", "--jobs-dir", help="Where jobs are stored"),
+    output: Optional[Path] = typer.Option(None, "--output", "-o", help="Legacy single-target workspace directory"),
     provider: str = typer.Option("openai", "--provider", "-p", help="LLM provider"),
     model: Optional[str] = typer.Option(None, "--model", "-m", help="Model name"),
-    max_steps: int = typer.Option(20, "--max-steps", help="Maximum probe turns"),
-    time_budget: float = typer.Option(300.0, "--time-budget", help="Wall-clock budget (seconds)"),
-    max_tokens: Optional[int] = typer.Option(None, "--max-tokens", help="Stop once total LLM tokens exceed this budget"),
-    rate_per_min: int = typer.Option(60, "--rate", help="Max requests per minute"),
+    max_steps: int = typer.Option(20, "--max-steps", help="Maximum probe turns per target"),
+    time_budget: float = typer.Option(300.0, "--time-budget", help="Wall-clock budget in seconds (used when --duration is not set)"),
+    rate_per_min: Optional[int] = typer.Option(None, "--rate", help="Max requests per minute, global across targets (default 60)"),
     allow_host: List[str] = typer.Option([], "--allow-host", help="Extra in-scope host(s)"),
-    resume: bool = typer.Option(False, "--resume", help="Resume a previous run (needs --output)"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Deterministic engine, no LLM"),
 ):
-    """Autonomous probability-driven scan — hypotheses, evidence, decision log"""
-    banner()
-    from .auto.session import run_auto
-    from .auto.state import ScanState
+    """Autonomous probability-driven scan — multi-target, resumable jobs"""
+    from .auto.jobs import JobManager
 
+    manager = JobManager(jobs_dir)
+    if jobs:
+        _print_jobs(manager)
+        return
+
+    banner()
     provider, model = _resolve_provider(provider, model)
 
-    # Resolve the workspace root (new run gets a timestamped dir; resume reuses one).
+    # Legacy single-workspace engine: kept verbatim for `--output` users.
     if output is not None:
-        root = output
-        root.mkdir(parents=True, exist_ok=True)
-    elif resume:
-        root = _latest_auto_root()
-        if root is None:
-            console.print("[red]--resume needs a prior run; none found. Pass --output.[/red]")
-            raise typer.Exit(1)
-    else:
-        ws = Workspace(f"auto-{url.strip('/').split('/')[-1]}")
-        root = ws.path
+        if not url:
+            console.print("[red]--output needs a positional URL (legacy single-target mode).[/red]")
+            raise typer.Exit(2)
+        _auto_legacy(url, output, provider, model, max_steps, time_budget,
+                     rate_per_min or 60, allow_host, resume is not None, dry_run,
+                     max_tokens=max_tokens)
+        return
 
+    from .auto.jobs import parse_duration
+    from .auto.scope import ScopeError, read_spec_file
+
+    try:
+        dur = parse_duration(duration) if duration else None
+    except ValueError as e:
+        console.print(f"[red][ERR] {e}[/red]")
+        raise typer.Exit(2)
+
+    if resume is not None:
+        try:
+            job = (manager.latest_resumable() if resume == RESUME_LATEST
+                   else manager.load(resume))
+        except (FileNotFoundError, ValueError) as e:
+            console.print(f"[red][ERR] {e}[/red]")
+            raise typer.Exit(1)
+        if job is None:
+            console.print("[red]No unfinished job to resume. See `suvari.py auto --jobs`.[/red]")
+            raise typer.Exit(1)
+        if job.status == "done":
+            console.print(f"[yellow]Job {job.id} is already done.[/yellow] "
+                          f"Report: {manager.job_dir(job.id) / job.report}")
+            raise typer.Exit(1)
+        if url or target or targets_file:
+            console.print("[yellow]Ignoring target arguments: resuming the stored job.[/yellow]")
+        # explicit budget flags extend/override the stored budget
+        for k, v in (("duration", dur), ("max_requests", max_requests),
+                     ("max_tokens", max_tokens), ("concurrency", concurrency),
+                     ("rate_per_min", rate_per_min)):
+            if v is not None:
+                job.budget[k] = v
+        manager.save(job)
+    else:
+        specs = ([url] if url else []) + [*target]
+        try:
+            if targets_file:
+                specs += read_spec_file(targets_file)
+            scope_specs = read_spec_file(scope_file) if scope_file else None
+            if not specs:
+                console.print("[red]No target given. Use URL, --target or --targets.[/red]")
+                raise typer.Exit(2)
+            job = manager.create(
+                specs, scope_specs=scope_specs, extra_scope=allow_host,
+                allow_large_scope=allow_large_scope,
+                duration=dur if dur is not None else time_budget,
+                max_requests=max_requests, max_tokens=max_tokens,
+                max_steps=max_steps, rate_per_min=rate_per_min or 60,
+                concurrency=concurrency or 1, dry_run=dry_run,
+                provider=provider, model=model,
+            )
+        except (ScopeError, OSError) as e:
+            console.print(f"[red][ERR] scope: {e}[/red]")
+            raise typer.Exit(2)
+
+    _run_job(manager, job)
+
+
+def _run_job(manager, job) -> None:
+    from rich.markup import escape
+    from .auto.jobs import JobRunner, format_duration
+    from .auto.session import build_llm
+
+    eng = job.engine
+    llm = None
+    if not eng.get("dry_run"):
+        try:
+            llm = build_llm(eng.get("provider"), eng.get("model"))
+        except RuntimeError as e:
+            console.print(f"[red][ERR] {e}[/red]")
+            raise typer.Exit(1)
+
+    b = job.budget
+    job_dir = manager.job_dir(job.id)
+    engine_label = "deterministic (dry-run)" if eng.get("dry_run") else \
+        f"{eng.get('provider')}/{eng.get('model') or 'default'}"
+    console.print(f"[bold][JOB] {job.id}[/bold]  [dim]{job_dir}[/dim]")
+    console.print(f"[bold][TGT] Targets:[/bold] {len(job.targets)}  "
+                  f"[bold]Scope:[/bold] {', '.join(job.scope)}")
+    console.print(f"[bold][MODE]  Engine:[/bold] {engine_label}")
+    console.print(
+        "[dim]budget: "
+        + (format_duration(b["duration"]) if b.get("duration") else "no time limit")
+        + f" / {b.get('max_requests') or '∞'} requests / {b.get('max_tokens') or '∞'} tokens"
+        + f" · {b.get('max_steps')} steps per target · concurrency {b.get('concurrency')}"
+        + f" · {b.get('rate_per_min')} req/min global · safe mode (GET only)[/dim]\n")
+
+    def on_event(kind: str, msg: str) -> None:
+        style = {"stop": "yellow", "target-skip": "yellow", "target-error": "red",
+                 "target-end": "green"}.get(kind, "cyan")
+        console.print(f"  [{style}]\\[{kind}][/{style}] {escape(msg)}")
+
+    runner = JobRunner(job, manager, llm=llm, on_event=on_event)
+    try:
+        result = runner.run()
+    except KeyboardInterrupt:
+        console.print(f"[yellow]Aborted. Resume where it left off: "
+                      f"python suvari.py auto --resume {job.id}[/yellow]")
+        raise typer.Exit(130)
+
+    c = result["counters"]
+    color = {"done": "green", "paused": "yellow"}.get(result["status"], "red")
+    console.print(f"\n[{color}]{result['status'].upper()}[/{color}] — {result['stop_reason']}")
+    console.print(f"  targets {len(result['targets'])} · requests {c['requests']} · "
+                  f"turns {c['turns']} · findings {c['findings']} · "
+                  f"blocked {c['blocked']} · active {format_duration(c['elapsed'])}")
+    for t in result["targets"]:
+        console.print(f"  - {t['url']}: {t['status']} ({t['turns']} turns, "
+                      f"{t['findings']} findings)")
+    console.print(f"[bold][DOC] Report:[/bold] {result['report']}")
+    if result["status"] != "done":
+        console.print(f"[yellow]Resume where it left off: "
+                      f"python suvari.py auto --resume {job.id}[/yellow]")
+    try:
+        (Path("output") / ".last").write_text(str(job_dir))
+    except Exception:
+        pass
+
+
+def _print_jobs(manager) -> None:
+    from rich.table import Table
+    from .auto.jobs import format_duration
+
+    jobs = manager.list()
+    if not jobs:
+        console.print(f"[yellow]No jobs under {manager.root}[/yellow]")
+        return
+    t = Table(show_header=True, header_style="bold cyan")
+    for col in ("ID", "Status", "Targets", "Active time", "Requests", "Findings", "Created"):
+        t.add_column(col)
+    from datetime import datetime
+    for j in jobs:
+        done = sum(1 for x in j.targets if x.status not in ("pending", "running", "paused"))
+        t.add_row(j.id, j.status, f"{done}/{len(j.targets)}",
+                  format_duration(j.counters.get("elapsed", 0)),
+                  str(j.counters.get("requests", 0)),
+                  str(j.counters.get("findings", 0)),
+                  datetime.fromtimestamp(j.created_at).strftime("%Y-%m-%d %H:%M"))
+    console.print(t)
+
+
+def _auto_legacy(url, output, provider, model, max_steps, time_budget,
+                 rate_per_min, allow_host, resume, dry_run,
+                 max_tokens=None) -> None:
+    """Original single-target engine writing into one workspace directory."""
+    from .auto.session import run_auto
+
+    root = output
+    root.mkdir(parents=True, exist_ok=True)
     console.print(f"[bold][TGT] Target:[/bold] {url}")
     engine_label = "deterministic (dry-run)" if dry_run else f"{provider}/{model or 'default'}"
     console.print(f"[bold][MODE]  Engine:[/bold] {engine_label}")
@@ -368,16 +529,37 @@ def auto(
         pass
 
 
-def _latest_auto_root() -> Optional[Path]:
-    """Most recent output/* directory that holds an auto/state.json."""
-    from .auto.state import ScanState
-    out = Path("output")
-    if not out.exists():
-        return None
-    candidates = [d for d in out.iterdir() if d.is_dir() and ScanState.exists(d)]
-    if not candidates:
-        return None
-    return max(candidates, key=lambda d: d.stat().st_mtime)
+def normalize_auto_argv(argv: list[str]) -> list[str]:
+    """Let ``--resume`` work both bare (legacy flag) and with a job id.
+
+    Typer options cannot take an optional value, so a bare ``--resume`` (end
+    of line, followed by another option, or followed by a URL/target rather
+    than a job id) gets the ``latest`` sentinel inserted.
+    """
+    if "auto" not in argv:
+        return argv
+    out = argv[:]  # (`list` is shadowed by the `list` command below)
+    i = out.index("auto") + 1
+    while i < len(out):
+        if out[i] == "--resume":
+            nxt = out[i + 1] if i + 1 < len(out) else None
+            if nxt is None or nxt.startswith("-") or not _looks_like_job_id(nxt):
+                out.insert(i + 1, RESUME_LATEST)
+            i += 2
+            continue
+        i += 1
+    return out
+
+
+def _looks_like_job_id(s: str) -> bool:
+    import re
+    return bool(re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]*", s)) and not re.fullmatch(r"[0-9]+", s)
+
+
+def main() -> None:
+    import sys
+    sys.argv[1:] = normalize_auto_argv(sys.argv[1:])
+    app()
 
 
 @app.command()

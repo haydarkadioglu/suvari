@@ -37,10 +37,17 @@ class Evidence:
 
 
 class EvidenceStore:
-    def __init__(self, auto_dir: Path):
-        self.dir = Path(auto_dir) / "evidence"
-        self.md = Path(auto_dir) / "evidence.md"
+    def __init__(self, auto_dir: Path, *, evidence_dir: Path | None = None,
+                 md_path: Path | None = None, rel_prefix: str = "auto/evidence"):
+        self.dir = Path(evidence_dir) if evidence_dir else Path(auto_dir) / "evidence"
+        self.md = Path(md_path) if md_path else Path(auto_dir) / "evidence.md"
+        self.rel_prefix = rel_prefix.rstrip("/")
         self._seq = 0
+
+    @classmethod
+    def for_state(cls, state) -> "EvidenceStore":
+        return cls(state.auto_dir, evidence_dir=state.evidence_dir,
+                   md_path=state.evidence_md, rel_prefix=state.evidence_rel)
 
     def next_id(self) -> str:
         self._seq += 1
@@ -75,9 +82,10 @@ class EvidenceStore:
         return ev
 
     def rel_path(self, ev: Evidence) -> str:
-        return f"auto/evidence/{ev.id}.json"
+        return f"{self.rel_prefix}/{ev.id}.json"
 
     def _append_md(self, ev: Evidence) -> None:
+        self.md.parent.mkdir(parents=True, exist_ok=True)
         if not self.md.exists():
             self.md.write_text("# Evidence log\n\n")
         mark = "POSITIVE" if ev.positive else "negative"

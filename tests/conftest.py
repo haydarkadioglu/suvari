@@ -22,3 +22,20 @@ def vuln_server():
     httpd, base_url, _thread = mod.serve(0)
     yield base_url
     httpd.shutdown()
+
+
+@pytest.fixture()
+def make_server():
+    """Factory: start extra vuln servers (``port=0`` = ephemeral) for one test."""
+    mod = _load_vuln_server()
+    started = []
+
+    def _make(port: int = 0):
+        httpd, base_url, _ = mod.serve(port)
+        started.append(httpd)
+        return httpd, base_url
+
+    yield _make
+    for httpd in started:
+        httpd.shutdown()
+        httpd.server_close()

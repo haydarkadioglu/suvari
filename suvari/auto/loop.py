@@ -14,8 +14,7 @@ loop continues.
 from __future__ import annotations
 
 import logging
-from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 from ..failure import classify_failure
 from . import tech_vectors
@@ -41,7 +40,9 @@ class AutoLoop:
     def __init__(self, state: ScanState, planner: Planner, executor: Executor,
                  max_steps: int = 20, time_budget: float = 300.0,
                  max_tokens: Optional[int] = None,
-                 logger: Optional[logging.Logger] = None):
+                 logger: Optional[logging.Logger] = None,
+                 should_stop: Optional[Callable[[], Optional[str]]] = None,
+                 on_turn: Optional[Callable[[], None]] = None):
         self.state = state
         self.planner = planner
         self.executor = executor
@@ -49,13 +50,20 @@ class AutoLoop:
         self.time_budget = time_budget
         self.max_tokens = max_tokens
         self.log = logger or log
-        self.evidence = EvidenceStore(state.auto_dir)
+        # external (job-level) stop condition and per-turn checkpoint hook
+        self.should_stop = should_stop
+        self.on_turn = on_turn
+        self.evidence = EvidenceStore.for_state(state)
         # keep evidence sequence consistent across resume
         self.evidence._seq = _max_evidence_seq(state)
         # continue token accounting across resume rather than restarting at zero
         self.planner.usage.merge_totals(state.usage)
 
     def _budget_left(self) -> Optional[str]:
+        if self.should_stop is not None:
+            reason = self.should_stop()
+            if reason:
+                return reason
         if self.state.turn >= self.max_steps:
             return f"max-steps reached ({self.max_steps})"
         if len(self.state.tried_actions) >= self.MAX_REQUESTS:
@@ -109,13 +117,22 @@ class AutoLoop:
                 break
 
             self.state.turn += 1
+            deferred = False
             try:
-                self._run_turn(plan)
+                deferred = self._run_turn(plan)
             except Exception as e:  # noqa: BLE001 - never let one turn kill the loop
                 self.log.exception("turn %d failed", self.state.turn)
                 self.state.notes.append(f"turn {self.state.turn} error: {e}")
             self._sync_usage()
+            if deferred:
+                # nothing was sent: the turn never happened; retry on resume
+                self.state.turn -= 1
+                self.state.save()
+                stop_reason = self._budget_left() or "request not sent (budget)"
+                break
             self.state.save()
+            if self.on_turn is not None:
+                self.on_turn()
 
         self.state.notes.append(f"stopped: {stop_reason}")
         self._sync_usage()
@@ -130,7 +147,8 @@ class AutoLoop:
             "detected_tech": sorted(self.planner.detected_tech),
         }
 
-    def _run_turn(self, plan) -> None:
+    def _run_turn(self, plan) -> bool:
+        """Run one turn; True if the probe was deferred (not sent)."""
         h: Hypothesis = plan.hypothesis
         key = _action_key(plan.tool, plan.args)
 
@@ -138,7 +156,7 @@ class AutoLoop:
         if self.state.already_tried(key):
             h.status = STATUS_EXHAUSTED
             self._log_decision(plan, None, "skipped (duplicate action)")
-            return
+            return False
         self.state.mark_tried(key)
 
         posterior_before = h.posterior
@@ -146,6 +164,10 @@ class AutoLoop:
 
         # execute (scoped HTTP probe)
         res = self.executor.http_probe(plan.url)
+        if res.deferred:
+            self.state.tried_actions.remove(key)
+            h.attempts -= 1
+            return True
 
         # classify L0-L5
         classifier_output = res.error or f"HTTP {res.status}\n{res.body}"
@@ -188,6 +210,7 @@ class AutoLoop:
 
         self._log_decision(plan, ev, interp["detail"] or res.error,
                            posterior_before, posterior_after, level.name, positive)
+        return False
 
     def _emit_finding(self, h: Hypothesis, interp: dict, ev) -> None:
         if any(f["vector"] == h.vector and f["target"] == h.target
