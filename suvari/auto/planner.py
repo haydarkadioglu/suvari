@@ -20,14 +20,17 @@ from __future__ import annotations
 import json
 import logging
 import re
+import time
 from dataclasses import dataclass
 from typing import Callable, Optional
 from urllib.parse import urljoin, urlparse
 
+from . import tech_vectors
 from .executor import ALLOWLIST, ExecResult
 from .hypothesis import (
     Hypothesis, STATUS_CONFIRMED, STATUS_REFUTED,
 )
+from .usage import UsageRecord, UsageTracker, estimate_tokens
 
 log = logging.getLogger("suvari.auto.planner")
 
@@ -112,6 +115,13 @@ VECTOR_RULES: dict[str, Vector] = {v.key: v for v in [
            0.5, "MEDIUM", _detect_path),
 ]}
 
+# Merge the technology-aware vectors (firebase, nextjs, …) into the rule table
+# so interpret()/reporting treat them exactly like the built-in vectors. Their
+# target is dynamic (supplied by the hypothesis), so path stays empty.
+for _r in tech_vectors.TECH_RULES:
+    VECTOR_RULES.setdefault(_r.key, Vector(
+        _r.key, _r.title, "", _r.prior, _r.severity, _r.detect))
+
 
 @dataclass
 class Plan:
@@ -128,16 +138,27 @@ class Planner:
         self.base_url = base_url.rstrip("/") + "/"
         self.llm = llm
         self.dry_run = dry_run
+        self.usage = UsageTracker()
+        self.detected_tech: set[str] = set()
+        self.tech_ctx: dict = {}
 
     def use_llm(self) -> bool:
         return self.llm is not None and not self.dry_run
 
     # ── bootstrap ───────────────────────────────────────────────────────
-    def bootstrap(self, state) -> None:
-        """Seed the initial hypotheses from the rule table (deterministic)."""
-        for v in VECTOR_RULES.values():
-            if v.key == "path-probe":
-                continue  # dynamic only
+    def bootstrap(self, state, recon_responses=None) -> None:
+        """Seed the initial hypotheses.
+
+        Seeds the static rule table, then — before any LLM call — fingerprints
+        the stack from ``recon_responses`` and seeds the technology-specific and
+        generic read-only vectors so the LLM steers an informed surface rather
+        than a blind one.
+        """
+        # Static, built-in vectors (skip the dynamic ones added by tech/robots).
+        static_keys = {v.key for v in VECTOR_RULES.values()} - set(
+            tech_vectors.TECH_RULE_BY_KEY) - {"path-probe"}
+        for key in static_keys:
+            v = VECTOR_RULES[key]
             hid = state.next_hypothesis_id()
             url = urljoin(self.base_url, v.path.lstrip("/"))
             state.add_hypothesis(Hypothesis(
@@ -145,8 +166,49 @@ class Planner:
                 prior=v.prior, posterior=v.prior, severity=v.severity,
                 rationale="seed hypothesis from rule table",
             ))
+
+        # Tech-aware and generic probes are seeded only once recon has run
+        # (``recon_responses`` provided, even if empty); a bare bootstrap with
+        # no recon context stays on the deterministic static table.
+        if recon_responses is not None:
+            self._seed_tech_vectors(state, recon_responses)
+
         if self.use_llm():
             self._llm_augment(state)
+
+    def _seed_tech_vectors(self, state, recon_responses) -> None:
+        """Detect the stack and seed tech-specific + generic probe hypotheses."""
+        self.detected_tech = tech_vectors.detect_tech(recon_responses or [])
+        if "firebase" in self.detected_tech:
+            self.tech_ctx = tech_vectors.firebase_context(recon_responses or [])
+
+        specs = list(tech_vectors.generic_vectors(self.base_url))
+        for tech in sorted(self.detected_tech):
+            specs.extend(tech_vectors.vectors_for(tech, self.base_url, self.tech_ctx))
+
+        existing = {(h.vector, h.target) for h in state.hypotheses.values()}
+        seeded = 0
+        for spec in specs:
+            if (spec.vector, spec.target) in existing:
+                continue
+            rule = tech_vectors.TECH_RULE_BY_KEY[spec.vector]
+            hid = state.next_hypothesis_id()
+            state.add_hypothesis(Hypothesis(
+                id=hid, title=spec.title, target=spec.target, vector=spec.vector,
+                prior=spec.prior, posterior=spec.prior, severity=rule.severity,
+                rationale="tech-aware seed" + (
+                    f" ({', '.join(sorted(self.detected_tech))})"
+                    if self.detected_tech else " (generic)"),
+            ))
+            existing.add((spec.vector, spec.target))
+            seeded += 1
+        if self.detected_tech:
+            state.notes.append(
+                f"detected tech: {', '.join(sorted(self.detected_tech))}; "
+                f"seeded {seeded} tech-aware vectors")
+            if self.tech_ctx.get("project"):
+                state.notes.append(
+                    f"firebase project: {self.tech_ctx['project']}")
 
     # ── selection ───────────────────────────────────────────────────────
     def select(self, state) -> Optional[Plan]:
@@ -222,14 +284,43 @@ class Planner:
         f'Valid tools: {sorted(ALLOWLIST)}\n'
     )
 
+    def _chat(self, prompt: str, max_tokens: int = 900) -> str:
+        """Call ``llm.chat`` once, recording token usage and wall time.
+
+        Uses the provider's ``usage`` block when available (exact counts); when
+        the provider returns none, falls back to a character/4 estimate flagged
+        ``estimated=True`` so the report never overstates its precision.
+        """
+        t0 = time.monotonic()
+        text = self.llm.chat(
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.1, max_tokens=max_tokens,
+        )
+        duration = time.monotonic() - t0
+        model = getattr(self.llm, "model", "") or "unknown"
+        reported = getattr(self.llm, "last_usage", None)
+        if reported and (reported.get("prompt_tokens") or reported.get("completion_tokens")):
+            rec = UsageRecord(
+                model=model,
+                prompt_tokens=int(reported.get("prompt_tokens", 0)),
+                completion_tokens=int(reported.get("completion_tokens", 0)),
+                duration=duration, estimated=False,
+            )
+        else:
+            rec = UsageRecord(
+                model=model,
+                prompt_tokens=estimate_tokens(prompt),
+                completion_tokens=estimate_tokens(text or ""),
+                duration=duration, estimated=True,
+            )
+        self.usage.add(rec)
+        return text
+
     def _llm_call_json(self, prompt: str) -> Optional[dict]:
         """Call the LLM and parse strict JSON, up to 3 attempts total."""
         for attempt in range(3):
             try:
-                text = self.llm.chat(
-                    messages=[{"role": "user", "content": prompt}],
-                    temperature=0.1, max_tokens=900,
-                )
+                text = self._chat(prompt, max_tokens=900)
             except Exception as e:  # noqa: BLE001
                 log.warning("LLM call failed (attempt %d): %s", attempt + 1, e)
                 continue
@@ -243,7 +334,9 @@ class Planner:
         prompt = (
             "You are a web security planner. Given the target, propose up to 4 "
             "additional distinct hypotheses worth testing.\n"
-            f"Target: {self.base_url}\n" + self._SCHEMA_HINT
+            f"Target: {self.base_url}\n"
+            + self._tech_context_hint(state)
+            + self._SCHEMA_HINT
         )
         data = self._llm_call_json(prompt)
         if data is None:
@@ -267,6 +360,23 @@ class Planner:
                 severity=VECTOR_RULES[vector].severity,
                 rationale=str(hd.get("rationale", "llm-proposed"))[:200],
             ))
+
+    def _tech_context_hint(self, state) -> str:
+        """Tell the model what stack was detected and which vectors are seeded.
+
+        The model still chooses; it just chooses informed rather than blind.
+        """
+        if not self.detected_tech:
+            return ""
+        seeded = sorted({h.vector for h in state.hypotheses.values()
+                         if h.vector in tech_vectors.TECH_RULE_BY_KEY})
+        hint = ("Detected technology: " + ", ".join(sorted(self.detected_tech)) + ".\n")
+        if self.tech_ctx.get("project"):
+            hint += f"Firebase project id: {self.tech_ctx['project']}.\n"
+        if seeded:
+            hint += ("Stack-specific vectors already seeded (read-only GET only): "
+                     + ", ".join(seeded) + ".\n")
+        return hint
 
     def _llm_select(self, state, testable: list[Hypothesis]) -> Optional[Plan]:
         listing = "\n".join(

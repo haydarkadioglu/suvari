@@ -13,6 +13,7 @@ from pathlib import Path
 
 from .hypothesis import STATUS_CONFIRMED, STATUS_REFUTED
 from .state import ScanState
+from .usage import format_summary, human_tokens
 
 _SEV_ORDER = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3, "INFO": 4}
 
@@ -28,6 +29,43 @@ _RECS = {
                                 "(plus HSTS) response headers.",
     "path-probe": "Protect disclosed internal paths with authentication or remove "
                   "them from the public server.",
+    # technology-aware vectors
+    "firebase-init-exposure": "Do not serve `/__/firebase/init.json`; load Firebase "
+                              "config from the SDK's reserved URLs only where needed.",
+    "firebase-config-leak": "A public Firebase web config is expected, but lock it "
+                            "down with Security Rules and App Check so the keys are "
+                            "not usable for unauthorized reads/writes.",
+    "firebase-rtdb-open": "Tighten Realtime Database Security Rules — require auth "
+                          "for reads/writes; never leave `.read: true` at the root.",
+    "firestore-open": "Tighten Firestore Security Rules to deny unauthenticated "
+                      "document reads.",
+    "firebase-storage-open": "Tighten Storage Security Rules so objects are not "
+                             "publicly listable or readable.",
+    "firebase-identity-config": "Review enabled sign-in providers; disable any that "
+                                "are not used.",
+    "firebase-files-exposure": "Remove `firebase.json`/`.firebaserc`/service-account "
+                               "keys from the web root; never deploy service "
+                               "credentials to the client.",
+    "nextjs-sourcemap": "Disable production source maps (`productionBrowserSourceMaps: "
+                        "false`) so original source is not served.",
+    "nextjs-data": "Treat `/_next/data` payloads as public; keep secrets out of "
+                   "server-rendered props.",
+    "nextjs-api": "Review exposed API routes for authentication and input validation.",
+    "netlify-functions": "Require authorization in serverless functions; do not rely "
+                         "on obscurity of the endpoint path.",
+    "netlify-identity": "Review Netlify Identity registration settings and disable "
+                        "open signup if not intended.",
+    "netlify-config": "Remove sensitive rules from public `_headers`/`_redirects`.",
+    "wp-users": "Restrict the `wp-json/wp/v2/users` endpoint to block username "
+                "enumeration.",
+    "wp-xmlrpc": "Disable `xmlrpc.php` if unused to cut brute-force/pingback surface.",
+    "wp-login": "Rate-limit and protect `wp-login.php` (e.g. 2FA, IP allowlist).",
+    "sitemap-leak": "Review the sitemap for paths that should not be publicly "
+                    "discoverable.",
+    "security-txt": "Informational — a security.txt is good practice; keep it current.",
+    "dotenv-exposure": "Remove the `.env` file from the web root immediately and "
+                       "rotate any leaked secrets.",
+    "server-status": "Restrict `/server-status` (mod_status) to localhost/trusted IPs.",
 }
 
 
@@ -52,6 +90,39 @@ def write_report(state: ScanState, result: dict) -> Path:
       f"refuted {sum(1 for h in state.hypotheses.values() if h.status == STATUS_REFUTED)})")
     a(f"- Findings: {len(findings)}")
     a(f"- Planner: {'deterministic fallback used' if state.fell_back_to_deterministic else 'as configured'}")
+    tech = result.get("detected_tech") or []
+    if tech:
+        n_tech = sum(1 for h in state.hypotheses.values()
+                     if h.rationale.startswith("tech-aware"))
+        a(f"- Detected technology: {', '.join(tech)} "
+          f"({n_tech} technology-aware vectors seeded)")
+    a("")
+
+    # ── LLM usage ──
+    a("## LLM usage")
+    a("")
+    u = state.usage or {}
+    if u.get("calls"):
+        a(f"- Calls: {u.get('calls', 0)}")
+        a(f"- Prompt tokens: {human_tokens(u.get('prompt_tokens', 0))} "
+          f"({u.get('prompt_tokens', 0)})")
+        a(f"- Completion tokens: {human_tokens(u.get('completion_tokens', 0))} "
+          f"({u.get('completion_tokens', 0)})")
+        a(f"- Total tokens: {human_tokens(u.get('total_tokens', 0))} "
+          f"({u.get('total_tokens', 0)})")
+        if u.get("models"):
+            a(f"- Model(s): {', '.join(u['models'])}")
+        if u.get("cost_known") and u.get("cost_usd") is not None:
+            a(f"- Approx. cost: ~${u['cost_usd']:.4f} USD")
+        else:
+            a("- Approx. cost: cost unknown (no price for this model)")
+        if u.get("estimated_calls"):
+            a(f"- Note: {u['estimated_calls']} of {u['calls']} calls had "
+              f"**estimated** token counts (provider returned no usage data).")
+    else:
+        a("_No LLM calls (deterministic engine)._")
+    a("")
+    a(f"`{format_summary(u)}`")
     a("")
 
     # ── findings ──

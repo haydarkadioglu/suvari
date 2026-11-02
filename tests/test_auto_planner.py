@@ -62,14 +62,19 @@ def test_extract_json_garbage_returns_none():
 
 
 def test_bootstrap_seeds_rule_table(tmp_path):
+    from suvari.auto.tech_vectors import TECH_RULE_BY_KEY
     st = _fresh_state(tmp_path)
-    Planner(BASE, dry_run=True).bootstrap(st)
+    Planner(BASE, dry_run=True).bootstrap(st)  # no recon -> static table only
     vectors = {h.vector for h in st.hypotheses.values()}
     # every static vector seeded, dynamic path-probe excluded
     assert "path-probe" not in vectors
     assert "git-exposure" in vectors
     assert "missing-security-headers" in vectors
-    assert len(st.hypotheses) == len(VECTOR_RULES) - 1
+    # no tech-aware vectors without recon
+    assert not (vectors & set(TECH_RULE_BY_KEY))
+    # the built-in static vectors (rule table minus tech rules and path-probe)
+    static = set(VECTOR_RULES) - set(TECH_RULE_BY_KEY) - {"path-probe"}
+    assert len(st.hypotheses) == len(static)
 
 
 def test_dry_run_select_picks_highest_posterior(tmp_path):
