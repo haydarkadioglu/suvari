@@ -55,7 +55,7 @@ class EvidenceStore:
 
     def record(self, hypothesis_id: str, vector: str, turn: int,
                res: ExecResult, failure_level: str, positive: bool,
-               detail: str) -> Evidence:
+               detail: str, extra: dict | None = None) -> Evidence:
         self.dir.mkdir(parents=True, exist_ok=True)
         ev = Evidence(
             id=self.next_id(),
@@ -76,6 +76,7 @@ class EvidenceStore:
             positive=positive,
             detail=detail,
             error=res.error,
+            extra=dict(extra or {}),
         )
         (self.dir / f"{ev.id}.json").write_text(json.dumps(ev.to_dict(), indent=2))
         self._append_md(ev)
@@ -89,8 +90,16 @@ class EvidenceStore:
         if not self.md.exists():
             self.md.write_text("# Evidence log\n\n")
         mark = "POSITIVE" if ev.positive else "negative"
+        tag = ""
+        if ev.extra.get("source"):
+            tag = f" (source: {ev.extra['source']}"
+            if ev.extra.get("cves"):
+                tag += ", " + ", ".join(ev.extra["cves"][:6])
+            if ev.extra.get("reused_response"):
+                tag += ", reused response — no new request"
+            tag += ")"
         line = (
-            f"## {ev.id} — {ev.hypothesis_id} ({ev.vector}) [{mark}]\n"
+            f"## {ev.id} — {ev.hypothesis_id} ({ev.vector}) [{mark}]{tag}\n"
             f"- turn: {ev.turn}\n"
             f"- request: GET {ev.request['url']}\n"
             f"- status: {ev.response['status']}  "

@@ -58,6 +58,9 @@ class AutoLoop:
         self.evidence._seq = _max_evidence_seq(state)
         # continue token accounting across resume rather than restarting at zero
         self.planner.usage.merge_totals(state.usage)
+        # url -> last ExecResult; lets research checks reuse a response that
+        # was already fetched (recon, shared error page) instead of re-sending
+        self._responses: dict = {}
 
     def _budget_left(self) -> Optional[str]:
         if self.should_stop is not None:
@@ -90,10 +93,13 @@ class AutoLoop:
     def _recon(self) -> list:
         """One read-only GET of the homepage to fingerprint the stack."""
         try:
-            return [self.executor.http_probe(self.planner.base_url)]
+            res = self.executor.http_probe(self.planner.base_url)
         except Exception as e:  # noqa: BLE001 - recon must never kill the run
             self.log.warning("recon probe failed: %s", e)
             return []
+        if res.status:
+            self._responses[res.url] = res
+        return [res]
 
     def run(self) -> dict:
         self.state.ensure_dirs()
@@ -151,23 +157,32 @@ class AutoLoop:
         """Run one turn; True if the probe was deferred (not sent)."""
         h: Hypothesis = plan.hypothesis
         key = _action_key(plan.tool, plan.args)
+        research = h.meta.get("source") == "research"
+        reused = research and plan.url in self._responses
 
-        # repeat protection: never run the same tool+args twice
-        if self.state.already_tried(key):
-            h.status = STATUS_EXHAUSTED
-            self._log_decision(plan, None, "skipped (duplicate action)")
-            return False
-        self.state.mark_tried(key)
+        # repeat protection: never run the same tool+args twice (research
+        # checks may instead re-read a response already on hand)
+        if not reused:
+            if self.state.already_tried(key):
+                h.status = STATUS_EXHAUSTED
+                self._log_decision(plan, None, "skipped (duplicate action)")
+                return False
+            self.state.mark_tried(key)
 
         posterior_before = h.posterior
         h.attempts += 1
 
-        # execute (scoped HTTP probe)
-        res = self.executor.http_probe(plan.url)
-        if res.deferred:
-            self.state.tried_actions.remove(key)
-            h.attempts -= 1
-            return True
+        # execute (scoped HTTP probe), or reuse the response already fetched
+        if reused:
+            res = self._responses[plan.url]
+        else:
+            res = self.executor.http_probe(plan.url)
+            if res.deferred:
+                self.state.tried_actions.remove(key)
+                h.attempts -= 1
+                return True
+            if res.status:
+                self._responses[plan.url] = res
 
         # classify L0-L5
         classifier_output = res.error or f"HTTP {res.status}\n{res.body}"
@@ -177,10 +192,14 @@ class AutoLoop:
         interp = self.planner.interpret(h, res)
         positive = interp["positive"]
 
+        extra = None
+        if research:
+            extra = {"source": "research", "reused_response": reused,
+                     "cves": _hyp_cves(h)}
         ev = self.evidence.record(
             hypothesis_id=h.id, vector=h.vector, turn=self.state.turn,
             res=res, failure_level=level.name, positive=positive,
-            detail=interp["detail"],
+            detail=interp["detail"], extra=extra,
         )
         h.evidence.append(ev.id)
 
@@ -189,9 +208,16 @@ class AutoLoop:
         posterior_after = h.posterior
 
         # resolve status + emit finding
-        if positive:
+        if research:
+            self._record_research(h, interp, ev)
+        if interp.get("inconclusive"):
+            # e.g. version not disclosed: neither confirmed nor refuted
+            h.status = STATUS_EXHAUSTED
+        elif positive:
             h.status = STATUS_CONFIRMED
-            if posterior_after >= CONFIRM_THRESHOLD:
+            if interp.get("verified_cves"):
+                self._emit_research_findings(h, interp, ev)
+            elif posterior_after >= CONFIRM_THRESHOLD:
                 self._emit_finding(h, interp, ev)
             # spawn follow-ups (concentrate where probability is high)
             if interp["children"]:
@@ -211,6 +237,49 @@ class AutoLoop:
         self._log_decision(plan, ev, interp["detail"] or res.error,
                            posterior_before, posterior_after, level.name, positive)
         return False
+
+    def _record_research(self, h: Hypothesis, interp: dict, ev) -> None:
+        """Attach a research check's outcome to every CVE candidate it covers."""
+        cands = {c["cve"]: c for c in self.state.research.get("candidates", [])}
+        verified = set(interp.get("verified_cves") or [])
+        for cid in _hyp_cves(h):
+            c = cands.get(cid)
+            if c is None:
+                continue
+            kind = h.meta.get("kind", "")
+            if kind == "version-fingerprint":
+                positive = cid in verified
+            else:
+                positive = bool(interp["positive"])
+            c["results"].append({
+                "hypothesis": h.id, "kind": kind, "positive": positive,
+                "inconclusive": bool(interp.get("inconclusive")),
+                "detail": interp["detail"][:200],
+                "evidence": self.evidence.rel_path(ev),
+            })
+
+    def _emit_research_findings(self, h: Hypothesis, interp: dict, ev) -> None:
+        """One finding per CVE whose affected range contains the target version."""
+        by_id = {c["id"]: c for c in h.meta.get("cves", [])}
+        for cid in interp["verified_cves"]:
+            if any(f.get("cve") == cid for f in self.state.findings):
+                continue
+            c = by_id.get(cid, {})
+            tags = f"CVSS {c.get('cvss')}" + (", KEV" if c.get("kev") else "")
+            self.state.findings.append({
+                "id": f"F{len(self.state.findings) + 1:03d}",
+                "hypothesis_id": h.id,
+                "title": f"{cid} ({tags}): {h.meta.get('tech')} version in affected range",
+                "severity": c.get("severity") or interp["severity"],
+                "vector": h.vector,
+                "target": h.target,
+                "detail": interp["detail"],
+                "evidence": self.evidence.rel_path(ev),
+                "posterior": round(h.posterior, 3),
+                "confirmed_turn": self.state.turn,
+                "cve": cid,
+                "source": "research",
+            })
 
     def _emit_finding(self, h: Hypothesis, interp: dict, ev) -> None:
         if any(f["vector"] == h.vector and f["target"] == h.target
@@ -247,7 +316,18 @@ class AutoLoop:
             "positive": positive,
             "result": (result or "")[:200],
             "evidence": self.evidence.rel_path(ev) if ev else None,
+            "origin": h.meta.get("source", "rules"),
+            "cves": _hyp_cves(h),
         })
+
+
+def _hyp_cves(h: Hypothesis) -> list[str]:
+    """CVE ids a research hypothesis speaks to (empty for rule-table ones)."""
+    m = h.meta or {}
+    ids = [c["id"] for c in m.get("cves", [])]
+    if m.get("cve"):
+        ids.append(m["cve"])
+    return ids + [c for c in m.get("also_cves", []) if c not in ids]
 
 
 def _max_evidence_seq(state: ScanState) -> int:

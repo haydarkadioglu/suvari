@@ -72,6 +72,42 @@ def detect_tech(responses) -> set[str]:
     return tech
 
 
+# (tech, where, pattern) — ``where`` is a header name or "body".
+_VERSION_PATTERNS = [
+    ("nginx", "server", r"nginx/(\d+\.\d+(?:\.\d+)?)"),
+    ("apache", "server", r"apache/(\d+\.\d+(?:\.\d+)?)"),
+    ("iis", "server", r"microsoft-iis/(\d+\.\d+)"),
+    ("php", "x-powered-by", r"php/(\d+\.\d+(?:\.\d+)?)"),
+    ("nextjs", "x-powered-by", r"next\.js[ /]v?(\d+\.\d+(?:\.\d+)?)"),
+    ("nextjs", "body", r"window\.next\s*=\s*\{\s*version:\s*[\"'](\d+\.\d+\.\d+)"),
+    ("nextjs", "body", r"\"next\"\s*:\s*\"[\^~]?(\d+\.\d+\.\d+)\""),
+    ("nextjs", "body", r"next\.js\s+v?(\d+\.\d+\.\d+)"),
+    ("wordpress", "body", r"<meta[^>]+generator[^>]+wordpress\s+(\d+\.\d+(?:\.\d+)?)"),
+    ("wordpress", "body", r"wp-(?:includes|emoji)[^\"']*[?&]ver=(\d+\.\d+(?:\.\d+)?)"),
+]
+
+
+def detect_versions(responses) -> dict[str, str]:
+    """Version traces per technology (``{"nginx": "1.24.0"}``), best effort.
+
+    Reads Server / X-Powered-By banners, meta generators and inline bundle
+    markers. Absent when the target hides them — callers must treat a missing
+    version as *unknown*, never as *not vulnerable*.
+    """
+    found: dict[str, str] = {}
+    for res in responses or []:
+        if res is None:
+            continue
+        for tech, where, pat in _VERSION_PATTERNS:
+            if tech in found:
+                continue
+            text = (res.body or "") if where == "body" else _hdr(res, where)
+            m = re.search(pat, text, re.I)
+            if m:
+                found[tech] = m.group(1)
+    return found
+
+
 _FIREBASE_PROJECT_RE = re.compile(
     r'(?:"projectId"\s*:\s*"|projectId\s*:\s*["\'])([a-z0-9][a-z0-9-]{3,})',
     re.I,

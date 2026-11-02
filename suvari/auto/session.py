@@ -61,6 +61,7 @@ def run_auto(
     dry_run: bool = False,
     allow_hosts: Optional[list[str]] = None,
     safe: bool = True,
+    researcher=None,
 ) -> dict:
     root = Path(root)
     allowed = [_host(url)] + list(allow_hosts or [])
@@ -78,7 +79,7 @@ def run_auto(
     state.ensure_dirs()
 
     llm = None if dry_run else build_llm(provider, model)
-    planner = Planner(url, llm=llm, dry_run=dry_run)
+    planner = Planner(url, llm=llm, dry_run=dry_run, researcher=researcher)
     executor = Executor(state.allowed_hosts, rate_per_min=rate_per_min)
 
     loop = AutoLoop(state, planner, executor,
@@ -87,5 +88,8 @@ def run_auto(
     result = loop.run()
     report_path = write_report(state, result)
     result["report"] = str(report_path)
+    if state.research.get("enabled"):
+        from .report import research_stats
+        result["research"] = {**research_stats(state), "techs": state.research.get("techs", [])}
     result["root"] = str(root)
     return result

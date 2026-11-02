@@ -55,6 +55,8 @@ class ScanState:
             "calls": 0, "prompt_tokens": 0, "completion_tokens": 0,
             "total_tokens": 0, "estimated_calls": 0, "cost_usd": 0.0,
         }
+        # known-vulnerability research: techs queried + scored CVE candidates
+        self.research: dict = {}
         self._seq = 0
 
     # ── id helpers ──────────────────────────────────────────────────────
@@ -96,6 +98,7 @@ class ScanState:
             "fell_back_to_deterministic": self.fell_back_to_deterministic,
             "notes": self.notes,
             "usage": self.usage,
+            "research": self.research,
             "hypotheses": [h.to_dict() for h in self.hypotheses.values()],
             "decision_log": self.decision_log,
             "findings": self.findings,
@@ -123,6 +126,7 @@ class ScanState:
         st.notes = data.get("notes", [])
         if data.get("usage"):
             st.usage = data["usage"]
+        st.research = data.get("research", {})
         st.decision_log = data.get("decision_log", [])
         st.findings = data.get("findings", [])
         st.tried_actions = data.get("tried_actions", [])

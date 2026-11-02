@@ -75,6 +75,8 @@ class Hypothesis:
     rationale: str = ""
     evidence: list = field(default_factory=list)  # evidence ids
     parent: Optional[str] = None                   # id of spawning hypothesis
+    # origin-specific data, e.g. {"source": "research", "cve": ..., "kind": ...}
+    meta: dict = field(default_factory=dict)
 
     def update_posterior(self, likelihood_ratio: float) -> float:
         """Fold one observation into the posterior and return the new value."""

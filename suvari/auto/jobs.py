@@ -165,7 +165,8 @@ class TargetProgress:
 
 def _new_counters() -> dict:
     return {"requests": 0, "blocked": 0, "turns": 0, "findings": 0,
-            "elapsed": 0.0, "runs": 0, "llm_calls": 0, "llm_tokens": 0}
+            "elapsed": 0.0, "runs": 0, "llm_calls": 0, "llm_tokens": 0,
+            "research_requests": 0}
 
 
 @dataclass
@@ -228,7 +229,8 @@ class JobManager:
                rate_per_min: int = 60, concurrency: int = 1,
                dry_run: bool = False, provider: Optional[str] = None,
                model: Optional[str] = None, resolver=system_resolver,
-               job_id: Optional[str] = None) -> Job:
+               job_id: Optional[str] = None,
+               research: Optional[dict] = None) -> Job:
         """Expand targets, build the scope, mark out-of-scope targets blocked.
 
         Scope defaults to the targets themselves; ``scope_specs`` (e.g. from
@@ -249,7 +251,8 @@ class JobManager:
             budget={"duration": duration, "max_requests": max_requests,
                     "max_tokens": max_tokens, "max_steps": max_steps,
                     "rate_per_min": rate_per_min, "concurrency": max(1, concurrency)},
-            engine={"dry_run": dry_run, "provider": provider, "model": model},
+            engine={"dry_run": dry_run, "provider": provider, "model": model,
+                    "research": dict(research or {"enabled": False})},
         )
         used_keys: set[str] = set()
         for t in targets:
@@ -313,7 +316,7 @@ class JobRunner:
                  on_turn: Optional[Callable[["JobRunner", TargetProgress], None]] = None,
                  on_event: Optional[Callable[[str, str], None]] = None,
                  handle_signals: bool = True, reach_timeout: float = 3.0,
-                 probe_timeout: int = 15):
+                 probe_timeout: int = 15, researcher=None):
         self.job = job
         self.manager = manager
         self.dir = manager.job_dir(job.id)
@@ -327,6 +330,13 @@ class JobRunner:
         self.probe_timeout = probe_timeout
         self._lock = threading.RLock()
         self._stop_reason: Optional[str] = None
+        # known-CVE research, shared by every target so the per-job request
+        # budget (and the KEV index) is global
+        rcfg = job.engine.get("research") or {}
+        if researcher is None and rcfg.get("enabled"):
+            from .research import from_config
+            researcher = from_config(rcfg, start_count=job.counters.get("research_requests", 0))
+        self.researcher = researcher
         self._llm_base = (job.counters.get("llm_calls", 0), job.counters.get("llm_tokens", 0))
 
     # ── stop conditions ─────────────────────────────────────────────────
@@ -373,6 +383,8 @@ class JobRunner:
             if self.llm is not None:
                 c["llm_calls"] = self._llm_base[0] + self.llm.calls
                 c["llm_tokens"] = self._tokens()
+            if self.researcher is not None:
+                c["research_requests"] = self.researcher.requests_made
             self.manager.save(self.job)
 
     def write_report(self, final: bool = False) -> Path:
@@ -524,7 +536,7 @@ class JobRunner:
 
         planner = Planner(t.url, llm=self.llm,
                           dry_run=bool(self.job.engine.get("dry_run")),
-                          on_blocked=on_blocked)
+                          on_blocked=on_blocked, researcher=self.researcher)
 
         def after_turn() -> None:
             with self._lock:
@@ -553,6 +565,14 @@ class JobRunner:
                 t.status = T_DONE
                 t.finished_at = time.time()
         self.checkpoint()
+        if state.research.get("enabled"):
+            from .report import research_stats
+            r = research_stats(state)
+            techs = ", ".join(f"{x['tech']} {x.get('version') or '(version unknown)'}"
+                              for x in state.research.get("techs", [])) or "none"
+            self._event("research", f"{t.url}: {techs} — {r['found']} CVEs, "
+                                    f"{r['applicable']} applicable, {r['tested']} tested, "
+                                    f"{r['verified']} verified")
         self._event("target-end", f"{t.url}: {t.status} — {t.turns} turns, "
                                   f"{t.findings} findings ({t.stop_reason})")
         # interim report after every finished target

@@ -25,7 +25,7 @@ from dataclasses import dataclass
 from typing import Callable, Optional
 from urllib.parse import urljoin, urlparse
 
-from . import tech_vectors
+from . import reasoning, tech_vectors
 from .executor import ALLOWLIST, ExecResult
 from .hypothesis import (
     Hypothesis, STATUS_CONFIRMED, STATUS_REFUTED,
@@ -133,15 +133,29 @@ class Plan:
     source: str  # "deterministic" | "llm"
 
 
+# Research-derived hypotheses use these vector keys; they are interpreted by
+# :func:`reasoning.evaluate_probe`, not by the rule table.
+RESEARCH_VECTORS = {
+    "version-fingerprint": "cve-version-check",
+    "feature-endpoint": "cve-surface",
+    "security-header": "cve-mitigation-header",
+    "exposed-file": "cve-file-exposure",
+}
+
+
 class Planner:
     def __init__(self, base_url: str, llm=None, dry_run: bool = False,
-                 on_blocked: Optional[Callable[[str, str], None]] = None):
+                 on_blocked: Optional[Callable[[str, str], None]] = None,
+                 researcher=None, max_cves: int = 5):
         self.base_url = base_url.rstrip("/") + "/"
         self.llm = llm
         self.dry_run = dry_run
         self.usage = UsageTracker()
         self.detected_tech: set[str] = set()
         self.tech_ctx: dict = {}
+        # optional known-vulnerability research (suvari.auto.research.Researcher)
+        self.researcher = researcher
+        self.max_cves = max_cves
         # called with (url, reason) when a proposed target leaves the host
         self.on_blocked = on_blocked
 
@@ -180,6 +194,12 @@ class Planner:
         # no recon context stays on the deterministic static table.
         if recon_responses is not None:
             self._seed_tech_vectors(state, recon_responses)
+            if self.researcher is not None:
+                try:
+                    self._seed_research(state, recon_responses)
+                except Exception as e:  # noqa: BLE001 - research is fail-open
+                    log.warning("research failed: %s", e)
+                    state.notes.append(f"research skipped: {e}")
 
         if self.use_llm():
             self._llm_augment(state)
@@ -218,6 +238,114 @@ class Planner:
                 state.notes.append(
                     f"firebase project: {self.tech_ctx['project']}")
 
+    def _seed_research(self, state, recon_responses) -> None:
+        """Research known CVEs for the detected stack and seed the applicable ones.
+
+        For each researchable technology: query the sources, score every CVE's
+        applicability against what recon observed, and seed hypotheses only for
+        the top candidates (prior = applicability score). Version checks are
+        grouped into one hypothesis per technology because a single fingerprint
+        answers the range question for all of its CVEs.
+        """
+        from .research import PROFILES
+
+        versions = tech_vectors.detect_versions(recon_responses or [])
+        techs = sorted((self.detected_tech | set(versions)) & set(PROFILES))
+        rs = state.research = {"enabled": True, "techs": [], "candidates": []}
+        if not techs:
+            state.notes.append("research: no researchable technology detected")
+            return
+
+        existing = {(h.vector, h.target) for h in state.hypotheses.values()}
+        for tech in techs:
+            version = versions.get(tech)
+            rr = self.researcher.research(tech, version)
+            ev = reasoning.build_evidence(tech, version, recon_responses,
+                                          self.detected_tech, self.base_url)
+            rs["techs"].append({
+                "tech": tech, "version": version, "query": rr.query,
+                "total_found": rr.total_found, "returned": len(rr.cves),
+                "kev": sum(1 for c in rr.cves if c.get("exploited_in_wild")),
+                "from_cache": rr.from_cache, "stale": rr.stale, "error": rr.error,
+                "features": ev["features"],
+            })
+            scored = []
+            for cve in rr.cves:
+                app = reasoning.applicability(cve, ev)
+                scored.append({
+                    "cve": cve["id"], "tech": tech, "cvss": cve.get("cvss"),
+                    "severity": cve.get("severity") or "", "kev": bool(cve.get("exploited_in_wild")),
+                    "exploit_ref": bool(cve.get("exploit_ref")),
+                    "summary": (cve.get("summary") or "")[:240],
+                    "source": cve.get("source", ""),
+                    "score": app["score"], "why": app["why"], "checks": app["checks"],
+                    "ranges": reasoning.product_ranges(cve, tech),
+                    "tests": reasoning.plan_tests(cve, ev, self.base_url),
+                    "hypotheses": [], "results": [],
+                })
+            scored.sort(key=lambda c: (-c["score"], -(c["cvss"] or 0)))
+            rs["candidates"].extend(scored)
+            applicable = [c for c in scored if c["score"] >= reasoning.APPLICABLE_THRESHOLD]
+            self._seed_cve_hypotheses(state, tech, version, applicable, existing)
+
+        n_app = sum(1 for c in rs["candidates"] if c["score"] >= reasoning.APPLICABLE_THRESHOLD)
+        state.notes.append(
+            f"research: {len(rs['candidates'])} CVEs for {', '.join(techs)}; "
+            f"{n_app} scored applicable; {sum(1 for c in rs['candidates'] if c['hypotheses'])} seeded")
+
+    def _seed_cve_hypotheses(self, state, tech, version, applicable, existing) -> None:
+        """Seed one shared version check for every applicable CVE (a single
+        request answers all of them) plus a component/file/header check for
+        each of the top ``max_cves``."""
+        if not applicable:
+            return
+
+        def add(title, vector, target, prior, severity, meta, rationale):
+            hid = state.next_hypothesis_id()
+            state.add_hypothesis(Hypothesis(
+                id=hid, title=title[:120], target=target, vector=vector,
+                prior=prior, posterior=prior, severity=severity or "INFO",
+                rationale=rationale[:200], max_attempts=1,
+                meta={"source": "research", **meta},
+            ))
+            existing.add((vector, target))
+            return hid
+
+        # one version check per technology, covering every applicable CVE
+        vp = next(p for p in applicable[0]["tests"] if p["kind"] == "version-fingerprint")
+        top = applicable[0]
+        hid = add(
+            f"{tech} version in affected range of {len(applicable)} candidate CVE(s)",
+            RESEARCH_VECTORS["version-fingerprint"], vp["url"], top["score"],
+            top["severity"],
+            {"kind": "version-fingerprint", "tech": tech, "known_version": version,
+             "cves": [{"id": c["cve"], "cvss": c["cvss"], "severity": c["severity"],
+                       "kev": c["kev"], "ranges": c["ranges"]} for c in applicable]},
+            "research: " + ", ".join(c["cve"] for c in applicable))
+        for c in applicable:
+            c["hypotheses"].append(hid)
+
+        # one component/mitigation/file check per top CVE (first non-version test)
+        for c in applicable[:self.max_cves]:
+            probe = next((p for p in c["tests"] if p["kind"] != "version-fingerprint"), None)
+            if probe is None:
+                continue
+            vector = RESEARCH_VECTORS[probe["kind"]]
+            if (vector, probe["url"]) in existing:
+                # same check already seeded for another CVE: share it
+                for h in state.hypotheses.values():
+                    if h.vector == vector and h.target == probe["url"]:
+                        h.meta.setdefault("also_cves", []).append(c["cve"])
+                        c["hypotheses"].append(h.id)
+                        break
+                continue
+            tags = f"CVSS {c['cvss']}" + (", KEV" if c["kev"] else "")
+            meta = {k: v for k, v in probe.items() if k not in ("url", "method", "title")}
+            meta.update(cve=c["cve"], tech=tech, severity=c["severity"])
+            hid = add(f"{c['cve']} ({tags}): {probe['title']}", vector, probe["url"],
+                      c["score"], c["severity"], meta, f"research: {c['why']}")
+            c["hypotheses"].append(hid)
+
     # ── selection ───────────────────────────────────────────────────────
     def select(self, state) -> Optional[Plan]:
         """Choose the next hypothesis to test (highest posterior)."""
@@ -248,6 +376,8 @@ class Planner:
         Returns {positive, detail, lr, severity} and, for robots, a list of
         child paths to spawn.
         """
+        if h.meta.get("source") == "research":
+            return reasoning.evaluate_probe(h.meta, res)
         vec = VECTOR_RULES[h.vector]
         positive, detail = vec.detect(res)
         children: list[str] = []
@@ -345,6 +475,7 @@ class Planner:
             "additional distinct hypotheses worth testing.\n"
             f"Target: {self.base_url}\n"
             + self._tech_context_hint(state)
+            + reasoning.llm_context(state.research)
             + self._SCHEMA_HINT
         )
         data = self._llm_call_json(prompt)
@@ -391,11 +522,14 @@ class Planner:
     def _llm_select(self, state, testable: list[Hypothesis]) -> Optional[Plan]:
         listing = "\n".join(
             f'  {h.id}: vector={h.vector} posterior={h.posterior:.2f} target={h.target}'
+            + (f' cve={h.meta.get("cve") or ",".join(c["id"] for c in h.meta.get("cves", []))}'
+               if h.meta.get("source") == "research" else "")
             for h in testable
         )
         prompt = (
             "Pick the single most promising hypothesis to test next and explain "
             "why. Choose from these open hypotheses:\n" + listing + "\n\n"
+            + reasoning.llm_context(state.research)
             + self._SCHEMA_HINT
             + "\nThe next_action.hypothesis_id MUST be one of the ids above and "
             "next_action.tool MUST be an allowlisted tool."
