@@ -4,13 +4,17 @@ Each available Kali tool is its own MCP tool for AI agents.
 """
 
 import ipaddress
+import json
 import os
+import secrets
 import sys
 import logging
 from typing import Literal
+import uvicorn
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 from pathlib import Path
+from starlette.types import ASGIApp, Receive, Scope, Send
 from .tools.runner import ToolRunner
 
 # Suppress MCP internal noise
@@ -27,6 +31,7 @@ def configure_logging(level: int = logging.INFO) -> None:
 
 
 _DEFAULT_HOST = "127.0.0.1"
+_TOKEN_ENV = "SUVARI_MCP_TOKEN"
 _LOOPBACK_ALLOWED_HOSTS: tuple[str, ...] = ("127.0.0.1:*", "localhost:*", "[::1]:*")
 _LOOPBACK_ALLOWED_ORIGINS: tuple[str, ...] = (
     "http://127.0.0.1:*",
@@ -84,6 +89,72 @@ def build_transport_security(host: str) -> TransportSecuritySettings:
         allowed_hosts=allowed_hosts,
         allowed_origins=allowed_origins,
     )
+
+
+def resolve_token(cli_token: str | None = None) -> str | None:
+    """Return the bearer token to require, or None when authentication is disabled.
+
+    Precedence: explicit argument, then SUVARI_MCP_TOKEN. Blank values are ignored,
+    because an empty token would accept ``Authorization: Bearer `` and disable auth
+    without the operator noticing.
+    """
+    for candidate in (cli_token, os.environ.get(_TOKEN_ENV)):
+        if candidate and candidate.strip():
+            return candidate.strip()
+    return None
+
+
+def validate_bind(host: str, token: str | None) -> None:
+    """Refuse to expose an unauthenticated server on a non-loopback address."""
+    if token is None and not is_loopback_host(host):
+        raise ValueError(
+            f"Refusing to bind {host} without authentication: set a bearer token with "
+            f"--token or {_TOKEN_ENV}, or bind a loopback address."
+        )
+
+
+class BearerTokenMiddleware:
+    """Pure ASGI middleware that requires ``Authorization: Bearer <token>``.
+
+    Implemented as ASGI (not BaseHTTPMiddleware) so it also covers requests that
+    never reach the routing layer and so streaming responses stay untouched.
+    """
+
+    def __init__(self, app: ASGIApp, token: str) -> None:
+        if not token or not token.strip():
+            raise ValueError("Bearer token must not be empty")
+        self.app = app
+        self._token = token.encode()
+
+    def _is_authorized(self, scope: Scope) -> bool:
+        for name, value in scope.get("headers", []):
+            if name.lower() == b"authorization":
+                parts = value.split(None, 1)
+                return (
+                    len(parts) == 2
+                    and parts[0].lower() == b"bearer"
+                    and secrets.compare_digest(parts[1].strip(), self._token)
+                )
+        return False
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http" or self._is_authorized(scope):
+            await self.app(scope, receive, send)
+            return
+        logger.warning("Rejected unauthenticated MCP request from %s", scope.get("client"))
+        body = json.dumps(
+            {"error": "unauthorized", "detail": "missing or invalid bearer token"}
+        ).encode()
+        await send({
+            "type": "http.response.start",
+            "status": 401,
+            "headers": [
+                (b"content-type", b"application/json"),
+                (b"content-length", str(len(body)).encode()),
+                (b"www-authenticate", b'Bearer realm="suvari"'),
+            ],
+        })
+        await send({"type": "http.response.body", "body": body})
 
 
 mcp = FastMCP("Suvari — AI Pentester",
@@ -263,9 +334,11 @@ logger.info(f"MCP ready: {len(all_tools)} tools registered")
 
 # ── Multi-transport server ────────────────────────────────────────────────
 
-def run_server(host: str = "127.0.0.1", port: int = 8000) -> None:
+def run_server(host: str = "127.0.0.1", port: int = 8000, token: str | None = None) -> None:
     """Run MCP streamable-http server with request logging."""
     import logging
+    token = resolve_token(token)
+    validate_bind(host, token)
     logging.getLogger("mcp").setLevel(logging.INFO)
 
     # Print tool name when called
@@ -286,11 +359,12 @@ def run_server(host: str = "127.0.0.1", port: int = 8000) -> None:
     if not is_loopback_host(host):
         logger.warning(
             "!!! Suvari MCP is bound to %s and is REACHABLE FROM THE NETWORK. "
-            "There is NO AUTHENTICATION yet (S-04): anyone who can reach port %s "
-            "can run every tool on this machine. !!!",
+            "Anyone who holds the bearer token and can reach port %s can run every "
+            "tool on this machine. !!!",
             host,
             port,
         )
+        logger.info("Bearer-token authentication is enabled")
         if is_wildcard_host(host):
             logger.warning(
                 "Host header validation only accepts '%s', so clients connecting through a "
@@ -298,9 +372,14 @@ def run_server(host: str = "127.0.0.1", port: int = 8000) -> None:
                 "address (for example --host 10.1.2.3) instead of a wildcard.",
                 host,
             )
-    print(f"Suvari MCP: streamable-http on {host}:{port}")
+    auth_note = " (auth: bearer token)" if token is not None else ""
+    print(f"Suvari MCP: streamable-http on {host}:{port}{auth_note}")
     print(f"  POST /mcp - JSON-RPC")
-    mcp.run(transport="streamable-http")
+    # Built after transport_security is set: the session manager captures it on first call
+    app = mcp.streamable_http_app()
+    if token is not None:
+        app = BearerTokenMiddleware(app, token)
+    uvicorn.run(app, host=host, port=port, log_level="warning")
 
 
 # ── Entry point ────────────────────────────────────────────────────────────
@@ -310,5 +389,14 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Suvari MCP — Kali tools for AI agents")
     parser.add_argument("--host", default=default_host(), help="Bind address (default: loopback)")
     parser.add_argument("--port", type=int, default=default_port(), help="Port")
+    parser.add_argument(
+        "--token",
+        default=resolve_token(),
+        help="Bearer token required from clients (default: $SUVARI_MCP_TOKEN; empty disables auth)",
+    )
     args = parser.parse_args()
-    run_server(host=args.host, port=args.port)
+    try:
+        run_server(host=args.host, port=args.port, token=args.token)
+    except ValueError as exc:
+        # A refused bind must not look like a crash: print the reason and exit 1
+        raise SystemExit(f"error: {exc}") from None

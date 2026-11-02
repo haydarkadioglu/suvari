@@ -13,10 +13,19 @@ if __name__ == "__main__":
 
     # Import run_server only after logging is configured, so tool registration
     # (which emits the "MCP ready" line) is observable on the console.
-    from suvari.mcp_server import default_host, default_port, run_server
+    from suvari.mcp_server import default_host, default_port, resolve_token, run_server
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--host", default=default_host(), help="Bind address (default: loopback)")
     parser.add_argument("--port", type=int, default=default_port())
+    parser.add_argument(
+        "--token",
+        default=resolve_token(),
+        help="Bearer token required from clients (default: $SUVARI_MCP_TOKEN; empty disables auth)",
+    )
     args = parser.parse_args()
-    run_server(host=args.host, port=args.port)
+    try:
+        run_server(host=args.host, port=args.port, token=args.token)
+    except ValueError as exc:
+        # A refused bind must not look like a crash: print the reason and exit 1
+        raise SystemExit(f"error: {exc}") from None

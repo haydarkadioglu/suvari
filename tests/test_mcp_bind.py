@@ -117,7 +117,9 @@ def test_entry_points_have_no_wildcard_default(path):
 @pytest.fixture
 def stubbed_run(monkeypatch):
     """Stop run_server before it starts uvicorn and undo its global changes."""
-    monkeypatch.setattr(mcp, "run", lambda transport: None)
+    monkeypatch.setattr(mcp_server.uvicorn, "run", lambda app, **kwargs: None)
+    monkeypatch.setattr(mcp, "_session_manager", None)
+    monkeypatch.delenv("SUVARI_MCP_TOKEN", raising=False)
     for name in ("host", "port", "transport_security"):
         monkeypatch.setattr(mcp.settings, name, getattr(mcp.settings, name))
     server_logger = logging.getLogger("mcp.server.server")
@@ -132,11 +134,10 @@ def stubbed_run(monkeypatch):
 
 def test_run_server_warns_and_allows_host_on_network_bind(stubbed_run, caplog):
     with caplog.at_level(logging.WARNING, logger=mcp_server.logger.name):
-        run_server(host="10.1.2.3", port=8000)
+        run_server(host="10.1.2.3", port=8000, token="s3cret")
     warnings = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
     assert len(warnings) == 1
     assert "REACHABLE FROM THE NETWORK" in warnings[0]
-    assert "NO AUTHENTICATION" in warnings[0]
     assert "10.1.2.3:*" in mcp.settings.transport_security.allowed_hosts
     assert mcp.settings.transport_security.enable_dns_rebinding_protection is True
 
@@ -159,7 +160,7 @@ def test_is_wildcard_host(host, expected):
 
 def test_run_server_warns_about_host_validation_on_wildcard_bind(stubbed_run, caplog):
     with caplog.at_level(logging.WARNING, logger=mcp_server.logger.name):
-        run_server(host="0.0.0.0", port=8000)
+        run_server(host="0.0.0.0", port=8000, token="s3cret")
     messages = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
     assert len(messages) == 2
     assert "REACHABLE FROM THE NETWORK" in messages[0]
