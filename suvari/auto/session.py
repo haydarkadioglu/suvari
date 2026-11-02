@@ -55,6 +55,7 @@ def run_auto(
     model: Optional[str] = None,
     max_steps: int = 20,
     time_budget: float = 300.0,
+    max_tokens: Optional[int] = None,
     rate_per_min: int = 60,
     resume: bool = False,
     dry_run: bool = False,
@@ -71,7 +72,8 @@ def run_auto(
         state = ScanState(
             root, target=url, allowed_hosts=allowed,
             budget={"max_steps": max_steps, "time_budget": time_budget,
-                    "rate_per_min": rate_per_min, "safe": safe},
+                    "max_tokens": max_tokens, "rate_per_min": rate_per_min,
+                    "safe": safe},
         )
     state.ensure_dirs()
 
@@ -80,7 +82,8 @@ def run_auto(
     executor = Executor(state.allowed_hosts, rate_per_min=rate_per_min)
 
     loop = AutoLoop(state, planner, executor,
-                    max_steps=max_steps, time_budget=time_budget)
+                    max_steps=max_steps, time_budget=time_budget,
+                    max_tokens=max_tokens)
     result = loop.run()
     report_path = write_report(state, result)
     result["report"] = str(report_path)

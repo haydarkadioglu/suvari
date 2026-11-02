@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Optional
 
 from ..failure import classify_failure
+from . import tech_vectors
 from .evidence import EvidenceStore
 from .executor import Executor
 from .hypothesis import (
@@ -34,30 +35,65 @@ def _action_key(tool: str, args: list) -> str:
 
 
 class AutoLoop:
+    # Hard cap on total HTTP probes per run, independent of other budgets.
+    MAX_REQUESTS = 200
+
     def __init__(self, state: ScanState, planner: Planner, executor: Executor,
                  max_steps: int = 20, time_budget: float = 300.0,
+                 max_tokens: Optional[int] = None,
                  logger: Optional[logging.Logger] = None):
         self.state = state
         self.planner = planner
         self.executor = executor
         self.max_steps = max_steps
         self.time_budget = time_budget
+        self.max_tokens = max_tokens
         self.log = logger or log
         self.evidence = EvidenceStore(state.auto_dir)
         # keep evidence sequence consistent across resume
         self.evidence._seq = _max_evidence_seq(state)
+        # continue token accounting across resume rather than restarting at zero
+        self.planner.usage.merge_totals(state.usage)
 
     def _budget_left(self) -> Optional[str]:
         if self.state.turn >= self.max_steps:
             return f"max-steps reached ({self.max_steps})"
+        if len(self.state.tried_actions) >= self.MAX_REQUESTS:
+            return f"request cap reached ({self.MAX_REQUESTS})"
         if self.state.wall_elapsed() >= self.time_budget:
             return f"time-budget reached ({self.time_budget:.0f}s)"
+        if self.max_tokens is not None and \
+                self.state.usage.get("total_tokens", 0) >= self.max_tokens:
+            return f"token-budget reached ({self.max_tokens} tokens)"
         return None
+
+    def _sync_usage(self) -> None:
+        self.state.usage = self.planner.usage.totals()
+
+    def _extend_scope(self) -> None:
+        """Widen scope to the detected Firebase project's own backend hosts."""
+        hosts = tech_vectors.scope_hosts(self.planner.detected_tech,
+                                         self.planner.tech_ctx)
+        for h in hosts:
+            self.executor.allowed_hosts.add(h.lower())
+            if h not in self.state.allowed_hosts:
+                self.state.allowed_hosts.append(h)
+
+    def _recon(self) -> list:
+        """One read-only GET of the homepage to fingerprint the stack."""
+        try:
+            return [self.executor.http_probe(self.planner.base_url)]
+        except Exception as e:  # noqa: BLE001 - recon must never kill the run
+            self.log.warning("recon probe failed: %s", e)
+            return []
 
     def run(self) -> dict:
         self.state.ensure_dirs()
         if not self.state.hypotheses:
-            self.planner.bootstrap(self.state)
+            recon = self._recon()
+            self.planner.bootstrap(self.state, recon)
+            self._extend_scope()
+            self._sync_usage()
             self.state.save()
 
         stop_reason = ""
@@ -67,6 +103,7 @@ class AutoLoop:
                 stop_reason = over
                 break
             plan = self.planner.select(self.state)
+            self._sync_usage()  # select() may have made LLM calls
             if plan is None:
                 stop_reason = "no testable hypotheses remain"
                 break
@@ -77,9 +114,11 @@ class AutoLoop:
             except Exception as e:  # noqa: BLE001 - never let one turn kill the loop
                 self.log.exception("turn %d failed", self.state.turn)
                 self.state.notes.append(f"turn {self.state.turn} error: {e}")
+            self._sync_usage()
             self.state.save()
 
         self.state.notes.append(f"stopped: {stop_reason}")
+        self._sync_usage()
         self.state.save()
         return {
             "stop_reason": stop_reason,
@@ -87,6 +126,8 @@ class AutoLoop:
             "findings": self.state.findings,
             "hypotheses": [h.to_dict() for h in self.state.hypotheses.values()],
             "fell_back": self.state.fell_back_to_deterministic,
+            "usage": self.state.usage,
+            "detected_tech": sorted(self.planner.detected_tech),
         }
 
     def _run_turn(self, plan) -> None:

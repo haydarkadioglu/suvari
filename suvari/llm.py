@@ -98,6 +98,10 @@ class LLMClient:
             }
 
         self.client = httpx.Client(timeout=180)
+        # Normalised token usage from the most recent chat() call, or None when
+        # the provider returned no usage block. Readers (e.g. the autonomous
+        # planner's accountant) fall back to an estimate when this is None.
+        self.last_usage = None
 
     def chat(
         self,
@@ -108,6 +112,7 @@ class LLMClient:
         stream: bool = False,
     ) -> str:
         """Send a chat prompt with safety context injection for OpenAI."""
+        self.last_usage = None  # reset; set again iff the provider returns usage
         # Inject safety context for OpenAI (reduces refusal rate)
         if system:
             messages = [{"role": "system", "content": system}] + messages
@@ -223,7 +228,9 @@ class LLMClient:
                 f"Rate limited ({self.provider}): Too many requests. Try again later."
             )
         resp.raise_for_status()
-        return resp.json()["choices"][0]["message"]["content"]
+        data = resp.json()
+        self._record_usage(data.get("usage"))
+        return data["choices"][0]["message"]["content"]
 
     # ─── Anthropic/Claude (native API) ───
 
@@ -266,7 +273,30 @@ class LLMClient:
         if resp.status_code == 429:
             raise RuntimeError("Rate limited (anthropic): Too many requests.")
         resp.raise_for_status()
-        return resp.json()["content"][0]["text"]
+        data = resp.json()
+        self._record_usage(data.get("usage"))
+        return data["content"][0]["text"]
+
+    # ─── usage accounting ───
+
+    def _record_usage(self, usage: Optional[dict]) -> None:
+        """Normalise a provider ``usage`` block into prompt/completion/total.
+
+        OpenAI-style: ``prompt_tokens`` / ``completion_tokens``.
+        Anthropic-style: ``input_tokens`` / ``output_tokens``.
+        Sets ``self.last_usage`` to None when the provider returned nothing.
+        """
+        if not usage:
+            self.last_usage = None
+            return
+        prompt = usage.get("prompt_tokens", usage.get("input_tokens", 0)) or 0
+        completion = usage.get("completion_tokens", usage.get("output_tokens", 0)) or 0
+        total = usage.get("total_tokens") or (prompt + completion)
+        self.last_usage = {
+            "prompt_tokens": int(prompt),
+            "completion_tokens": int(completion),
+            "total_tokens": int(total),
+        }
 
     def __del__(self):
         if hasattr(self, "client"):

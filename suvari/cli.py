@@ -306,6 +306,7 @@ def auto(
     model: Optional[str] = typer.Option(None, "--model", "-m", help="Model name"),
     max_steps: int = typer.Option(20, "--max-steps", help="Maximum probe turns"),
     time_budget: float = typer.Option(300.0, "--time-budget", help="Wall-clock budget (seconds)"),
+    max_tokens: Optional[int] = typer.Option(None, "--max-tokens", help="Stop once total LLM tokens exceed this budget"),
     rate_per_min: int = typer.Option(60, "--rate", help="Max requests per minute"),
     allow_host: List[str] = typer.Option([], "--allow-host", help="Extra in-scope host(s)"),
     resume: bool = typer.Option(False, "--resume", help="Resume a previous run (needs --output)"),
@@ -340,7 +341,8 @@ def auto(
     try:
         result = run_auto(
             url, root, provider=provider, model=model,
-            max_steps=max_steps, time_budget=time_budget, rate_per_min=rate_per_min,
+            max_steps=max_steps, time_budget=time_budget, max_tokens=max_tokens,
+            rate_per_min=rate_per_min,
             resume=resume, dry_run=dry_run, allow_hosts=allow_host,
         )
     except RuntimeError as e:
@@ -350,9 +352,16 @@ def auto(
     findings = result.get("findings", [])
     console.print(f"[green]Done.[/green] {result['turns']} turns, {len(findings)} findings "
                   f"({result.get('stop_reason','')})")
+    tech = result.get("detected_tech") or []
+    if tech:
+        n_tech = sum(1 for h in result.get("hypotheses", [])
+                     if str(h.get("rationale", "")).startswith("tech-aware"))
+        console.print(f"[dim]detected: {', '.join(tech)} · {n_tech} tech-aware vectors[/dim]")
     for f in findings:
         console.print(f"  [[{f['severity']}]] {f['title']} — {f['target']}  [dim]{f['evidence']}[/dim]")
     console.print(f"[bold][DOC] Report:[/bold] {result['report']}")
+    from .auto.usage import format_summary
+    console.print(f"[dim]{format_summary(result.get('usage') or {})}[/dim]")
     try:
         (Path("output") / ".last").write_text(str(root))
     except Exception:
