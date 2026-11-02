@@ -12,9 +12,12 @@ from .state import ScanState
 from .planner import Planner
 from .executor import Executor
 from .loop import AutoLoop
-from .report import write_report
+from .report import write_report, write_job_report
+from .scope import Scope, ScopeError
+from .jobs import Job, JobManager, JobRunner
 
 __all__ = [
     "Hypothesis", "bayes_update", "ScanState", "Planner",
-    "Executor", "AutoLoop", "write_report",
+    "Executor", "AutoLoop", "write_report", "write_job_report",
+    "Scope", "ScopeError", "Job", "JobManager", "JobRunner",
 ]

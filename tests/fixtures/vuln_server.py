@@ -50,6 +50,7 @@ class VulnHandler(BaseHTTPRequestHandler):
         pass
 
     def do_GET(self):  # noqa: N802
+        self.server.hits.append(self.path)
         route = _ROUTES.get(self.path)
         if route is None:
             body = b"<html><body><h1>404 Not Found</h1></body></html>"
@@ -70,8 +71,12 @@ class VulnHandler(BaseHTTPRequestHandler):
 
 
 def serve(port: int = 0) -> tuple[ThreadingHTTPServer, str, threading.Thread]:
-    """Start the server on loopback. Returns (server, base_url, thread)."""
+    """Start the server on loopback. Returns (server, base_url, thread).
+
+    Every request path received is appended to ``server.hits``.
+    """
     httpd = ThreadingHTTPServer(("127.0.0.1", port), VulnHandler)
+    httpd.hits = []
     host, bound = httpd.server_address[0], httpd.server_address[1]
     thread = threading.Thread(target=httpd.serve_forever, daemon=True)
     thread.start()

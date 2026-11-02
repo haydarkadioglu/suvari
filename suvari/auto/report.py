@@ -75,8 +75,7 @@ def write_report(state: ScanState, result: dict) -> Path:
     reports_dir.mkdir(parents=True, exist_ok=True)
     out = reports_dir / f"auto-{ts}.md"
 
-    findings = sorted(state.findings,
-                      key=lambda f: _SEV_ORDER.get(f["severity"].upper(), 9))
+    findings = _sorted_findings(state)
     lines: list[str] = []
     a = lines.append
 
@@ -125,12 +124,29 @@ def write_report(state: ScanState, result: dict) -> Path:
     a(f"`{format_summary(u)}`")
     a("")
 
-    # ── findings ──
-    a("## Findings")
-    a("")
+    lines += _findings_section(findings, "##")
+    lines += _decision_log_section(state, "##")
+    lines += _tried_section(state, "##")
+    lines += _recommendations_section(findings, "##")
+    lines += _notes_section(state, "##")
+
+    out.write_text("\n".join(lines))
+    return out
+
+
+# ── reusable sections ──────────────────────────────────────────────────
+
+def _sorted_findings(state: ScanState) -> list[dict]:
+    return sorted(state.findings,
+                  key=lambda f: _SEV_ORDER.get(f["severity"].upper(), 9))
+
+
+def _findings_section(findings: list[dict], h: str) -> list[str]:
+    lines = [f"{h} Findings", ""]
+    a = lines.append
     if findings:
         for f in findings:
-            a(f"### [{f['severity']}] {f['title']}")
+            a(f"{h}# [{f['severity']}] {f['title']}")
             a(f"- Target: `{f['target']}`")
             a(f"- Detail: {f['detail']}")
             a(f"- Posterior: {f['posterior']}")
@@ -141,52 +157,175 @@ def write_report(state: ScanState, result: dict) -> Path:
             a("")
     else:
         a("_No findings._\n")
+    return lines
 
-    # ── decision log ──
-    a("## Decision log")
-    a("")
-    a("| Turn | Hypothesis | Prior | Post→ | Source | Result (L) | + | Action |")
-    a("|-----:|------------|------:|------:|--------|-----------|---|--------|")
+
+def _decision_log_section(state: ScanState, h: str) -> list[str]:
+    lines = [f"{h} Decision log", "",
+             "| Turn | Hypothesis | Prior | Post→ | Source | Result (L) | + | Action |",
+             "|-----:|------------|------:|------:|--------|-----------|---|--------|"]
     for d in state.decision_log:
         pb = d.get("posterior_before")
         pa = d.get("posterior_after")
         trans = f"{pb}→{pa}" if pb is not None else "-"
-        a(f"| {d['turn']} | {d['hypothesis']} | {d.get('prior','-')} | {trans} "
-          f"| {d['source']} | {d.get('result_class','-')} "
-          f"| {'Y' if d.get('positive') else 'n'} | `{d['action']}` |")
-    a("")
+        lines.append(
+            f"| {d['turn']} | {d['hypothesis']} | {d.get('prior','-')} | {trans} "
+            f"| {d['source']} | {d.get('result_class','-')} "
+            f"| {'Y' if d.get('positive') else 'n'} | `{d['action']}` |")
+    lines.append("")
+    return lines
 
-    # ── tried & refuted ──
-    a("## Tried but not confirmed")
-    a("")
-    dull = [h for h in state.hypotheses.values() if h.status != STATUS_CONFIRMED]
+
+def _tried_section(state: ScanState, h: str) -> list[str]:
+    lines = [f"{h} Tried but not confirmed", ""]
+    dull = [x for x in state.hypotheses.values() if x.status != STATUS_CONFIRMED]
     if dull:
-        for h in dull:
-            a(f"- `{h.id}` {h.title} — status={h.status}, "
-              f"posterior={h.posterior:.2f}, attempts={h.attempts}")
+        for x in dull:
+            lines.append(f"- `{x.id}` {x.title} — status={x.status}, "
+                         f"posterior={x.posterior:.2f}, attempts={x.attempts}")
     else:
-        a("_All tested hypotheses were confirmed._")
+        lines.append("_All tested hypotheses were confirmed._")
+    lines.append("")
+    return lines
+
+
+def _recommendations_section(findings: list[dict], h: str) -> list[str]:
+    lines = [f"{h} Recommendations", ""]
+    seen = set()
+    for f in findings:
+        rec = _RECS.get(f["vector"])
+        if rec and rec not in seen:
+            lines.append(f"- {rec}")
+            seen.add(rec)
+    if not seen:
+        lines.append("- No confirmed issues; re-run with an LLM provider for deeper coverage.")
+    lines.append("")
+    return lines
+
+
+def _notes_section(state: ScanState, h: str) -> list[str]:
+    if not state.notes:
+        return []
+    return [f"{h} Notes", ""] + [f"- {n}" for n in state.notes] + [""]
+
+
+# ── multi-target job report ────────────────────────────────────────────
+
+def job_report_path(job, job_dir: Path) -> Path:
+    ts = datetime.fromtimestamp(job.created_at).strftime("%Y%m%d_%H%M%S")
+    return Path(job_dir) / "reports" / f"auto-{ts}.md"
+
+
+def write_job_report(job, job_dir: Path, final: bool = False) -> Path:
+    """Write (or rewrite) the single report for a job.
+
+    Built only from what is on disk (checkpoint + per-target state files), so
+    it can be produced while the job is still running; ``final`` marks the
+    report as complete instead of interim.
+    """
+    from .jobs import format_duration
+
+    job_dir = Path(job_dir)
+    out = job_report_path(job, job_dir)
+    states: dict[str, ScanState] = {}
+    for t in job.targets:
+        sf = job_dir / t.state_rel
+        if sf.exists():
+            try:
+                states[t.key] = ScanState.load(job_dir, state_file=sf)
+            except (OSError, ValueError, KeyError):
+                pass
+
+    all_findings = [f for st in states.values() for f in st.findings]
+    c = job.counters
+    lines: list[str] = []
+    a = lines.append
+    mark = "FINAL" if final else "INTERIM — job still in progress or paused"
+
+    a(f"# Suvari autonomous job — {job.id}")
+    a("")
+    a(f"**Report status: {mark}**")
+    a("")
+    a(f"- Generated: {datetime.now().isoformat(timespec='seconds')}")
+    a(f"- Job status: {job.status}" + (f" ({job.stop_reason})" if job.stop_reason else ""))
+    a(f"- Engine: {'deterministic (dry-run)' if job.engine.get('dry_run') else (job.engine.get('provider') or '-') + '/' + (job.engine.get('model') or 'default')}")
+    a(f"- Scope: {', '.join(f'`{e}`' for e in job.scope)}")
     a("")
 
-    # ── recommendations ──
+    a("## Targets")
+    a("")
+    a("| # | Target | Status | Turns | Findings | Note |")
+    a("|--:|--------|--------|------:|---------:|------|")
+    for i, t in enumerate(job.targets, 1):
+        a(f"| {i} | `{t.url}` | {t.status} | {t.turns} | {t.findings} "
+          f"| {(t.stop_reason or '-').replace('|', '/')[:120]} |")
+    a("")
+
+    for t in job.targets:
+        a(f"## Target: {t.url}")
+        a("")
+        a(f"- Status: {t.status}" + (f" — {t.stop_reason}" if t.stop_reason else ""))
+        a(f"- Evidence directory: `{t.evidence_rel}/`")
+        st = states.get(t.key)
+        if st is None:
+            a("- Not scanned.")
+            a("")
+            continue
+        a(f"- Turns: {st.turn}; hypotheses: {len(st.hypotheses)}; "
+          f"findings: {len(st.findings)}")
+        a("")
+        findings = _sorted_findings(st)
+        lines += _findings_section(findings, "###")
+        lines += _decision_log_section(st, "###")
+        lines += _tried_section(st, "###")
+        lines += _notes_section(st, "###")
+
+    a("## Blocked by scope")
+    a("")
+    if job.blocked:
+        a("| Target | Reason | Source |")
+        a("|--------|--------|--------|")
+        for b in job.blocked:
+            a(f"| `{b['target']}` | {b['reason']} | {b.get('source', '')} |")
+    else:
+        a("_No requests were refused by scope._")
+    a("")
+
     a("## Recommendations")
     a("")
     seen = set()
-    for f in findings:
+    for f in sorted(all_findings, key=lambda f: _SEV_ORDER.get(f["severity"].upper(), 9)):
         rec = _RECS.get(f["vector"])
         if rec and rec not in seen:
             a(f"- {rec}")
             seen.add(rec)
     if not seen:
-        a("- No confirmed issues; re-run with an LLM provider for deeper coverage.")
+        a("- No confirmed issues.")
     a("")
 
-    if state.notes:
-        a("## Notes")
-        a("")
-        for n in state.notes:
-            a(f"- {n}")
-        a("")
+    counts = job.target_counts()
+    a("## Summary")
+    a("")
+    a(f"- Targets: {len(job.targets)} ("
+      + ", ".join(f"{k} {v}" for k, v in sorted(counts.items())) + ")")
+    a(f"- Requests sent: {c.get('requests', 0)}"
+      + (f" / budget {job.budget['max_requests']}" if job.budget.get("max_requests") else ""))
+    a(f"- Active time: {format_duration(c.get('elapsed', 0))}"
+      + (f" / budget {format_duration(job.budget['duration'])}" if job.budget.get("duration") else "")
+      + f" over {c.get('runs', 0)} run(s)")
+    a(f"- Turns: {c.get('turns', 0)}")
+    sev: dict[str, int] = {}
+    for f in all_findings:
+        sev[f["severity"]] = sev.get(f["severity"], 0) + 1
+    a(f"- Findings: {len(all_findings)}"
+      + (" (" + ", ".join(f"{k} {v}" for k, v in sorted(sev.items(), key=lambda kv: _SEV_ORDER.get(kv[0], 9))) + ")" if sev else ""))
+    a(f"- LLM usage: {c.get('llm_calls', 0)} calls, ~{c.get('llm_tokens', 0)} tokens"
+      + (f" / budget {job.budget['max_tokens']}" if job.budget.get("max_tokens") else ""))
+    a(f"- Blocked by scope: {len(job.blocked)}")
+    a("")
 
-    out.write_text("\n".join(lines))
+    out.parent.mkdir(parents=True, exist_ok=True)
+    tmp = out.with_suffix(".md.tmp")
+    tmp.write_text("\n".join(lines))
+    tmp.replace(out)
     return out

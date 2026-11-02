@@ -5,6 +5,7 @@ OpenAI, Anthropic (Claude), DeepSeek, Google Gemini, OpenRouter, Ollama.
 
 import os
 import json
+import threading
 from pathlib import Path
 from typing import Optional
 import httpx
@@ -102,6 +103,9 @@ class LLMClient:
         # the provider returned no usage block. Readers (e.g. the autonomous
         # planner's accountant) fall back to an estimate when this is None.
         self.last_usage = None
+        # cumulative token usage as reported by the provider (non-stream calls)
+        self.usage = {"calls": 0, "prompt_tokens": 0, "completion_tokens": 0}
+        self._usage_lock = threading.Lock()
 
     def chat(
         self,
@@ -285,9 +289,12 @@ class LLMClient:
         OpenAI-style: ``prompt_tokens`` / ``completion_tokens``.
         Anthropic-style: ``input_tokens`` / ``output_tokens``.
         Sets ``self.last_usage`` to None when the provider returned nothing.
+        Also accumulates into ``self.usage`` (cumulative, thread-safe).
         """
         if not usage:
             self.last_usage = None
+            with self._usage_lock:
+                self.usage["calls"] += 1
             return
         prompt = usage.get("prompt_tokens", usage.get("input_tokens", 0)) or 0
         completion = usage.get("completion_tokens", usage.get("output_tokens", 0)) or 0
@@ -297,6 +304,10 @@ class LLMClient:
             "completion_tokens": int(completion),
             "total_tokens": int(total),
         }
+        with self._usage_lock:
+            self.usage["calls"] += 1
+            self.usage["prompt_tokens"] += int(prompt)
+            self.usage["completion_tokens"] += int(completion)
 
     def __del__(self):
         if hasattr(self, "client"):

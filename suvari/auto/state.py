@@ -18,14 +18,25 @@ from .hypothesis import Hypothesis
 
 
 class ScanState:
-    """In-memory loop state backed by ``<workspace>/auto/state.json``."""
+    """In-memory loop state backed by ``<workspace>/auto/state.json``.
+
+    The file layout can be overridden (``state_file``, ``evidence_dir``,
+    ``evidence_md``, ``evidence_rel``) so a multi-target job can keep one state
+    file and one evidence directory per target under a single job directory.
+    """
 
     def __init__(self, root: Path, target: str, allowed_hosts: list[str],
-                 budget: Optional[dict] = None):
+                 budget: Optional[dict] = None, *,
+                 state_file: Optional[Path] = None,
+                 evidence_dir: Optional[Path] = None,
+                 evidence_md: Optional[Path] = None,
+                 evidence_rel: str = "auto/evidence"):
         self.root = Path(root)
         self.auto_dir = self.root / "auto"
-        self.evidence_dir = self.auto_dir / "evidence"
-        self.state_file = self.auto_dir / "state.json"
+        self.evidence_dir = Path(evidence_dir) if evidence_dir else self.auto_dir / "evidence"
+        self.state_file = Path(state_file) if state_file else self.auto_dir / "state.json"
+        self.evidence_md = Path(evidence_md) if evidence_md else self.auto_dir / "evidence.md"
+        self.evidence_rel = evidence_rel
 
         self.target = target
         self.allowed_hosts = list(allowed_hosts)
@@ -70,6 +81,7 @@ class ScanState:
     # ── persistence ─────────────────────────────────────────────────────
     def ensure_dirs(self) -> None:
         self.evidence_dir.mkdir(parents=True, exist_ok=True)
+        self.state_file.parent.mkdir(parents=True, exist_ok=True)
 
     def save(self) -> None:
         """Atomically persist the full state to disk."""
@@ -94,13 +106,16 @@ class ScanState:
         os.replace(tmp, self.state_file)
 
     @classmethod
-    def load(cls, root: Path) -> "ScanState":
-        """Rebuild a ScanState from a previously saved ``state.json``."""
+    def load(cls, root: Path, **layout) -> "ScanState":
+        """Rebuild a ScanState from a previously saved ``state.json``.
+
+        ``layout`` takes the same keyword overrides as the constructor.
+        """
         root = Path(root)
-        state_file = root / "auto" / "state.json"
+        state_file = Path(layout.get("state_file") or root / "auto" / "state.json")
         data = json.loads(state_file.read_text())
         st = cls(root, data["target"], data.get("allowed_hosts", []),
-                 data.get("budget", {}))
+                 data.get("budget", {}), **layout)
         st.turn = data.get("turn", 0)
         st._seq = data.get("seq", 0)
         st.elapsed_before_resume = data.get("elapsed", 0.0)
@@ -117,5 +132,5 @@ class ScanState:
         return st
 
     @staticmethod
-    def exists(root: Path) -> bool:
-        return (Path(root) / "auto" / "state.json").exists()
+    def exists(root: Path, state_file: Optional[Path] = None) -> bool:
+        return Path(state_file or Path(root) / "auto" / "state.json").exists()

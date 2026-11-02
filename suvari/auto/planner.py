@@ -134,13 +134,21 @@ class Plan:
 
 
 class Planner:
-    def __init__(self, base_url: str, llm=None, dry_run: bool = False):
+    def __init__(self, base_url: str, llm=None, dry_run: bool = False,
+                 on_blocked: Optional[Callable[[str, str], None]] = None):
         self.base_url = base_url.rstrip("/") + "/"
         self.llm = llm
         self.dry_run = dry_run
         self.usage = UsageTracker()
         self.detected_tech: set[str] = set()
         self.tech_ctx: dict = {}
+        # called with (url, reason) when a proposed target leaves the host
+        self.on_blocked = on_blocked
+
+    def _blocked(self, url: str, reason: str) -> None:
+        log.info("dropped off-target hypothesis %s (%s)", url, reason)
+        if self.on_blocked is not None:
+            self.on_blocked(url, reason)
 
     def use_llm(self) -> bool:
         return self.llm is not None and not self.dry_run
@@ -260,6 +268,7 @@ class Planner:
         for p in paths:
             url = urljoin(self.base_url, p.lstrip("/"))
             if urlparse(url).netloc != urlparse(self.base_url).netloc:
+                self._blocked(url, f"disclosed by {parent.id}, off target host")
                 continue  # stay on target host
             if url in existing_targets:
                 continue
@@ -348,6 +357,7 @@ class Planner:
                 continue
             target = hd.get("target") or urljoin(self.base_url, VECTOR_RULES[vector].path.lstrip("/"))
             if urlparse(target).netloc != urlparse(self.base_url).netloc:
+                self._blocked(target, "llm-proposed target off target host")
                 continue  # scope guard
             if any(h.target == target and h.vector == vector
                    for h in state.hypotheses.values()):
