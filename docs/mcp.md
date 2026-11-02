@@ -93,6 +93,15 @@ ngrok http 8000 --host-header=localhost:8000
 bind, so it cannot refuse to start without one, and the tunnel would publish an
 unauthenticated server to the internet. The warning above applies in full.
 
+## Input Restrictions
+
+`run_tool` and the per-tool MCP tools reject a `target` with a scheme other than
+`http` or `https` (for example `file://`, `file:/etc/hostname`, `gopher://` or
+`scp:`) with a tool error. Blank targets, bare hosts and `host:port` are
+accepted. `get_scan_report` only reads inside the `output` workspace: a
+`scan_dir` that leaves it through `..`, an absolute path or a symlink is
+rejected.
+
 ## Transport Formats
 
 | Transport | Endpoint | Clients |

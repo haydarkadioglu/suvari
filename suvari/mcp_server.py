@@ -157,6 +157,51 @@ class BearerTokenMiddleware:
         await send({"type": "http.response.body", "body": body})
 
 
+_WORKSPACE_ROOT_NAME = "output"
+_ALLOWED_TARGET_SCHEMES = frozenset({"http", "https"})
+
+
+def workspace_root() -> Path:
+    """Return the directory that holds scan workspaces (``output``)."""
+    return Path(_WORKSPACE_ROOT_NAME).resolve()
+
+
+def _looks_like_scheme(candidate: str) -> bool:
+    """Return True if ``candidate`` has the shape of a URL scheme (RFC 3986)."""
+    if not candidate or not candidate[0].isalpha():
+        return False
+    return all(char.isalnum() or char in "+.-" for char in candidate)
+
+
+def validate_target(target: str, *, field: str = "target") -> str:
+    """Return ``target`` unchanged, or raise ValueError when its scheme is not http(s).
+
+    A blank target and a bare host are allowed. ``file:/etc/hostname`` is a valid
+    URL to curl even without ``//``, so the scheme is detected on the first colon;
+    ``host:8080`` stays a host because the part after the colon is a port.
+    """
+    value = target.strip()
+    scheme, separator, rest = value.partition(":")
+    if not separator or not _looks_like_scheme(scheme) or rest[:1].isdigit():
+        return target
+    if scheme.lower() not in _ALLOWED_TARGET_SCHEMES:
+        raise ValueError(f"{field}: scheme '{scheme}' is not allowed, use http or https")
+    return target
+
+
+def resolve_report_dir(scan_dir: str) -> Path:
+    """Return the report directory for ``scan_dir``, confined to the workspace root.
+
+    Resolving first means ``..`` segments and symlinks that leave the root are
+    both rejected. Raises ValueError for anything outside the root.
+    """
+    root = workspace_root()
+    resolved = (root / scan_dir).resolve()  # an absolute scan_dir replaces root here
+    if resolved != root and root not in resolved.parents:
+        raise ValueError(f"scan_dir: '{scan_dir}' is outside the scan workspace")
+    return resolved
+
+
 mcp = FastMCP("Suvari — AI Pentester",
     instructions="80+ Kali Linux security tools as individual MCP tools. Use run_tool for any tool, or call the specific tool directly.",
     transport_security=build_transport_security(_DEFAULT_HOST),
@@ -184,6 +229,7 @@ def run_tool(
     timeout: int = 120,
 ) -> str:
     """Run any Kali Linux security tool."""
+    validate_target(target)
     runner = _get_runner()
     avail = runner.available_tools()
     if tool not in avail:
@@ -234,7 +280,7 @@ def list_available_tools() -> str:
 @mcp.tool()
 def get_scan_report(scan_dir: str = "") -> str:
     """Read a previous scan report or list recent scans."""
-    output_dir = Path("output")
+    output_dir = workspace_root()
     if not scan_dir:
         if not output_dir.exists():
             return "No scans yet."
@@ -244,10 +290,8 @@ def get_scan_report(scan_dir: str = "") -> str:
             report = d / "report.md"
             result += f"  {'✓' if report.exists() else '⋯'} {d.name}\n"
         return result
-    report_path = Path(scan_dir)
-    if not report_path.is_absolute():
-        report_path = output_dir / scan_dir
-    report_file = report_path / "report.md"
+    # report.md itself may be a symlink, so it is confined as well as its directory
+    report_file = resolve_report_dir(str(resolve_report_dir(scan_dir) / "report.md"))
     if not report_file.exists():
         return f"Report not found."
     return report_file.read_text()[:8000]
@@ -288,6 +332,7 @@ _KNOWN_CONFIGS = {
 
 def _make_tool_fn(tool_name: str):
     def fn(target: str = "", args: str = "", timeout: int = 120) -> str:
+        validate_target(target)
         runner = _get_runner()
         avail = runner.available_tools()
         if tool_name not in avail:
