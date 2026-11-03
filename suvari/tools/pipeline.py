@@ -19,19 +19,15 @@ import time
 from pathlib import Path
 from typing import Optional
 
+# Shared with tool argument validation; ``args`` must never import this module.
+from .args import FORBIDDEN_SUBSTRINGS as _FORBIDDEN_SUBSTRINGS
+from .args import OPERATOR_TOKENS as _OPERATOR_TOKENS
+
 logger = logging.getLogger("suvari.pipeline")
 
 # ANSI escape sequence cleaner. Defined here (not imported from ``runner``) so
 # that ``runner`` can import it from this module without a circular import.
 _ANSI_RE = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
-
-# Tokens that are shell control/redirection operators on their own.
-_OPERATOR_TOKENS = frozenset({
-    ";", "&", "&&", "||", ">", ">>", "<", "<<", "$", "(", ")", "{", "}",
-})
-
-# Substrings that reveal shell metacharacters smuggled inside a single token.
-_FORBIDDEN_SUBSTRINGS = (";", "`", "$(", "&&", "||")
 
 
 def clean_ansi(text: str) -> str:

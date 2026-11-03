@@ -15,6 +15,7 @@ from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 from pathlib import Path
 from starlette.types import ASGIApp, Receive, Scope, Send
+from .tools.args import ArgsError, parse_tool_args
 from .tools.runner import ToolRunner
 
 # Suppress MCP internal noise
@@ -235,7 +236,10 @@ def run_tool(
     if tool not in avail:
         return f"Tool '{tool}' not available on this system."
     host = target.split("://")[-1].split("/")[0]
-    arg_list = args.split() if args else []
+    try:
+        arg_list = parse_tool_args(tool, args)
+    except ArgsError as exc:
+        return f"[{tool}] error: {exc}"
     tool_configs = {
         "nuclei":    ["nuclei"] + arg_list + ["-u", target],
         "nikto":     ["nikto", "-h", target] + arg_list + ["-nointeractive"],
@@ -338,7 +342,10 @@ def _make_tool_fn(tool_name: str):
         if tool_name not in avail:
             return f"Tool '{tool_name}' not available."
         host = target.split("://")[-1].split("/")[0]
-        arg_list = args.split() if args else []
+        try:
+            arg_list = parse_tool_args(tool_name, args)
+        except ArgsError as exc:
+            return f"[{tool_name}] error: {exc}"
         if tool_name in _KNOWN_CONFIGS:
             template = _KNOWN_CONFIGS[tool_name]
             cmd = [tool_name]
