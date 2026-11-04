@@ -257,5 +257,5 @@ def _max_evidence_seq(state: ScanState) -> int:
             try:
                 seq = max(seq, int(eid.lstrip("E")))
             except ValueError:
-                pass
+                log.debug("ignoring non-numeric evidence id %r", eid)
     return seq

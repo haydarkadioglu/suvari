@@ -3,6 +3,7 @@ Orchestrator — main pipeline controller with P-E-R integration + checkpoint/re
 Inspired by Shannon's multi-agent pipeline + LuaN1aoAgent's P-E-R framework.
 """
 
+import logging
 from typing import Optional
 from .bus import FindingsBus
 from pathlib import Path
@@ -21,6 +22,9 @@ from .prompt_loader import PromptLoader
 from .core import Planner, Reflector
 from .scan_logger import ScanLogger
 from .mode import ScanMode
+from .logging_setup import log_swallowed
+
+log = logging.getLogger("suvari.orchestrator")
 
 console = Console()
 
@@ -353,7 +357,8 @@ class SuvariOrchestrator:
                 result = browser.login_form(self.target_url, username, password)
                 if result.get("success"):
                     return f"{username}:{password}"
-            except Exception:
+            except Exception as e:
+                log.debug("default login %s failed: %s", username, e, exc_info=True)
                 continue
         return None
 
@@ -425,8 +430,8 @@ class SuvariOrchestrator:
                     if exploit and not exploit.startswith("# Failed"):
                         (self.ws.path / f"exploit_{top['cve_id']}.py").write_text(exploit)
                         console.print(f"  Exploit saved")
-        except Exception:
-            pass
+        except Exception as e:
+            log_swallowed(log, "CVE intelligence task failed for %s", e, self.target_url)
         return findings
 
     def _run_causal_chain(self) -> dict:

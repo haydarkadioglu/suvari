@@ -454,8 +454,8 @@ def _extract_json(text: str) -> Optional[dict]:
     try:
         obj = json.loads(s)
         return obj if isinstance(obj, dict) else None
-    except json.JSONDecodeError:
-        pass
+    except json.JSONDecodeError as e:
+        log.debug("planner reply is not bare JSON, scanning for a {...} block: %s", e)
     # Fall back to the first balanced {...} block.
     start = s.find("{")
     if start == -1:

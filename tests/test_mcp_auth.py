@@ -187,14 +187,9 @@ def served_apps(monkeypatch):
     monkeypatch.delenv(TOKEN_ENV, raising=False)
     for name in ("host", "port", "transport_security"):
         monkeypatch.setattr(mcp.settings, name, getattr(mcp.settings, name))
-    server_logger = logging.getLogger("mcp.server.server")
-    monkeypatch.setattr(server_logger, "info", server_logger.info)
-    mcp_logger = logging.getLogger("mcp")
-    level = mcp_logger.level
+    # configure_logging(force=True) would drop pytest's caplog handler
+    monkeypatch.setattr(mcp_server, "configure_logging", lambda *a, **k: None)
     yield apps
-    mcp_logger.setLevel(level)
-    if hasattr(mcp, "_orig_log"):
-        del mcp._orig_log
 
 
 def test_streamable_http_app_requires_the_token(monkeypatch):

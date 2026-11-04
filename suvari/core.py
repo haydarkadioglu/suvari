@@ -11,7 +11,11 @@ from .bus import FindingsBus
 from .workspace import Workspace
 from .tools.runner import ToolRunner
 from .config import load_config
+from .logging_setup import log_swallowed
+import logging
 import re, json, shlex, subprocess as sp
+
+log = logging.getLogger("suvari.core")
 
 
 class SuvariCore:
@@ -109,8 +113,8 @@ class SuvariCore:
                                 lines.append(f"  {desc}")
                         loaded_findings = "\n".join(lines)
                         context += f"\n\nEXISTING FINDINGS:\n{loaded_findings}"
-                except Exception:
-                    pass
+                except Exception as e:
+                    log_swallowed(log, "could not load findings from %s", e, findings_file)
             if report_file.exists() and not loaded_findings:
                 report_text = report_file.read_text()
                 summary_lines = [l for l in report_text.split("\n") if any(x in l for x in ["Critical", "High", "Medium", "Low", "Total", "##"])]
@@ -205,8 +209,8 @@ class SuvariCore:
                 entry = display_text if display_text else (response[:200] if response else user_input)
                 with open(session_file, 'a') as f:
                     f.write(f"\n## {datetime.now().strftime('%H:%M:%S')}\n**User:** {user_input}\n\n**Suvari:** {entry[:500]}\n\n")
-            except Exception:
-                pass
+            except Exception as e:
+                log_swallowed(log, "could not append to chat session %s", e, session_file)
 
         return display_text or response[:500] or "Done."
 

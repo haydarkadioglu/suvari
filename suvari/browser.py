@@ -6,12 +6,16 @@ Browser Agent — Playwright-based browser automation for:
 - Screenshot evidence collection
 """
 
+import logging
 import time
 import re
 from typing import Optional
 from pathlib import Path
 from urllib.parse import urljoin, urlparse
 from .agents.base import fmt_time
+from .logging_setup import log_swallowed
+
+log = logging.getLogger("suvari.browser")
 
 try:
     from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
@@ -265,8 +269,8 @@ class BrowserAgent:
             for name, check in checks.items():
                 if self._page.evaluate(f"typeof({check}) !== 'undefined'"):
                     tech.append(name)
-        except Exception:
-            pass
+        except Exception as e:
+            log.debug("client tech detection probe failed: %s", e, exc_info=True)
         return tech
 
     def __enter__(self):
@@ -307,8 +311,8 @@ class BrowserAgent:
                     form_str = str(f).lower()
                     if any(w in form_str for w in ["password", "email", "username"]):
                         register_forms.append(f)
-        except Exception:
-            pass
+        except Exception as e:
+            log_swallowed(log, "register-link scrape failed on %s", e, url)
 
         if not register_forms:
             return {"success": False, "reason": "No registration form found"}

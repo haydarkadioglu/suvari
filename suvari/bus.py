@@ -3,10 +3,14 @@ Findings Bus — real-time pub/sub for agent communication.
 Agents publish findings as they discover them; other agents consume immediately.
 """
 
+import logging
 import threading
 import json
 from typing import Callable, Optional
 from datetime import datetime
+from .logging_setup import log_swallowed
+
+log = logging.getLogger("suvari.bus")
 
 
 class FindingsBus:
@@ -32,8 +36,9 @@ class FindingsBus:
                 for cb in callbacks:
                     try:
                         cb(agent, finding)
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        log_swallowed(log, "subscriber %r failed on finding from %s",
+                                      e, cb, agent)
 
     def subscribe(self, key: str, callback: Callable):
         """Subscribe to findings matching key (e.g. 'cve', 'port', 'vuln')."""

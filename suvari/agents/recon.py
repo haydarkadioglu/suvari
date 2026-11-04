@@ -3,11 +3,14 @@ Recon Agent — gathers information about the target.
 Parallel execution for speed, shows real-time elapsed time.
 """
 
+import logging
 import time
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from urllib.parse import urlparse, urlunparse
 from .base import BaseAgent, fmt_time
+
+log = logging.getLogger("suvari.agents.recon")
 
 
 def clean_url(url: str) -> str:
@@ -138,6 +141,6 @@ class ReconAgent(BaseAgent):
                             content = fpath.read_text(errors="replace")
                             parts.append(f"--- {fpath.relative_to(source_dir)} ({size}b) ---")
                             parts.append(content[:2000])
-                except Exception:
-                    pass
+                except Exception as e:
+                    log.debug("skipping unreadable source path %s: %s", fpath, e)
         return "\n".join(parts)

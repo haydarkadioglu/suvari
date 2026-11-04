@@ -16,18 +16,14 @@ from mcp.server.transport_security import TransportSecuritySettings
 from pathlib import Path
 from starlette.types import ASGIApp, Receive, Scope, Send
 from .tools.runner import ToolRunner
+from .logging_setup import configure_logging, log_swallowed
+
+__all__ = ["configure_logging"]
+
+logger = logging.getLogger("suvari.mcp")
 
 # Suppress MCP internal noise
 logging.getLogger("mcp").setLevel(logging.WARNING)
-
-
-def configure_logging(level: int = logging.INFO) -> None:
-    """Configure root logging so module log lines reach the console.
-
-    Idempotent: ``logging.basicConfig`` is a no-op once the root logger has
-    handlers, so calling this twice does not add duplicate handlers.
-    """
-    logging.basicConfig(level=level, format="%(levelname)s %(name)s: %(message)s")
 
 
 _DEFAULT_HOST = "127.0.0.1"
@@ -354,6 +350,7 @@ def _make_tool_fn(tool_name: str):
                     cmd.append(host)
         else:
             cmd = [tool_name] + arg_list + ([target] if target else [])
+        logger.info("tool call: %s target=%s", tool_name, target)
         try:
             output = runner.run(cmd, timeout=timeout)
             if output.startswith("(TIMEOUT") and timeout < 300:
@@ -362,6 +359,7 @@ def _make_tool_fn(tool_name: str):
                     return f"[{tool_name}] {target} — timeout"
             return f"[{tool_name}] {target}\n\n{output[:8000]}"
         except Exception as e:
+            log_swallowed(logger, f"tool {tool_name} failed on {target}", e)
             return f"[{tool_name}] error: {e}"
     fn.__name__ = tool_name
     fn.__doc__ = f"Run {tool_name} against a target."
@@ -373,30 +371,17 @@ for tool_name in sorted(all_tools.keys()):
     fn = _make_tool_fn(tool_name)
     mcp.add_tool(fn, name=tool_name)
 
-logger = logging.getLogger("suvari.mcp")
-logger.info(f"MCP ready: {len(all_tools)} tools registered")
+logger.info("MCP ready: %d tools registered", len(all_tools))
 
 
 # ── Multi-transport server ────────────────────────────────────────────────
 
 def run_server(host: str = "127.0.0.1", port: int = 8000, token: str | None = None) -> None:
     """Run MCP streamable-http server with request logging."""
-    import logging
     token = resolve_token(token)
     validate_bind(host, token)
-    logging.getLogger("mcp").setLevel(logging.INFO)
-
-    # Print tool name when called
-    mcp._orig_log = logging.getLogger("mcp.server.server").info
-    def log_hook(msg, *args, **kwargs):
-        # Catch CallToolRequest which contains the tool name
-        if "CallTool" in str(msg) or "handle_" in str(msg):
-            import re
-            match = re.search(r"CallToolRequest\('([^']+)'", str(args))
-            if match:
-                print(f"  [MCP] tool: {match.group(1)}")
-        mcp._orig_log(msg, *args, **kwargs)
-    logging.getLogger("mcp.server.server").info = log_hook
+    # Tool calls are logged by _make_tool_fn at INFO on "suvari.mcp".
+    configure_logging("info")
 
     mcp.settings.host = host
     mcp.settings.port = port

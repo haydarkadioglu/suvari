@@ -4,9 +4,13 @@ NOTE: Does NOT run recon tools (whatweb, nmap, curl headers, etc.)
 Those are ReconAgent's job. Scanner focuses on vulnerability detection.
 """
 
+import logging
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from .base import BaseAgent, fmt_time
+from ..logging_setup import log_swallowed
+
+log = logging.getLogger("suvari.agents.scanner")
 
 
 # ── Tool definitions (category, cmd builder, timeout) ────────────────────────
@@ -159,13 +163,13 @@ class ScannerAgent(BaseAgent):
         if "nuclei" in results and isinstance(results["nuclei"], str):
             try:
                 summary["nuclei"] = parse_nuclei_output(results["nuclei"])
-            except Exception:
-                pass
+            except Exception as e:
+                log_swallowed(log, "could not parse nuclei output", e)
         if "nikto" in results and isinstance(results["nikto"], str):
             try:
                 summary["nikto"] = parse_nikto_output(results["nikto"])
-            except Exception:
-                pass
+            except Exception as e:
+                log_swallowed(log, "could not parse nikto output", e)
 
         total = fmt_time(time.time() - total_start)
         self.log(f"Scan complete in {total}")
@@ -190,8 +194,8 @@ def parse_ai_tool_plan(text: str, available: dict) -> list:
     if cleaned.startswith("["):
         try:
             return _json.loads(cleaned)
-        except _json.JSONDecodeError:
-            pass
+        except _json.JSONDecodeError as e:
+            log.debug("tool plan is not valid JSON, using keyword fallback: %s", e)
 
     # Keyword fallback
     text_lower = text.lower()

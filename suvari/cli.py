@@ -2,6 +2,7 @@
 Suvari CLI — Typer-based command line interface.
 """
 
+import logging
 import typer
 from typing import List, Optional
 from pathlib import Path
@@ -11,13 +12,41 @@ from .orchestrator import SuvariOrchestrator
 from .workspace import Workspace
 from .config import configure_interactive, load_config
 from .mode import ScanMode
+from .logging_setup import LEVEL_NAMES, configure_logging, log_swallowed
 
+log = logging.getLogger("suvari.cli")
 console = Console()
 app = typer.Typer(
     name="suvari",
     help="[SUVARI] Suvari — AI-Powered Black-Box Web Pentester",
     no_args_is_help=True,
 )
+
+
+@app.callback()
+def _global_options(
+    log_level: str = typer.Option(
+        "warning", "--log-level",
+        help=f"Log verbosity: {', '.join(LEVEL_NAMES)}",
+    ),
+    debug: bool = typer.Option(False, "--debug", help="Debug logging with tracebacks"),
+) -> None:
+    """[SUVARI] Suvari — AI-Powered Black-Box Web Pentester"""
+    try:
+        configure_logging(log_level, debug=debug)
+    except ValueError as e:
+        raise typer.BadParameter(str(e), param_hint="--log-level")
+
+
+def _write_last_pointer(target: Path) -> bool:
+    """Record ``target`` in ``output/.last``; returns False if that fails."""
+    last_file = Path("output") / ".last"
+    try:
+        last_file.write_text(str(target))
+    except Exception as e:
+        log_swallowed(log, "could not write last-scan pointer %s", e, last_file)
+        return False
+    return True
 
 
 def banner():
@@ -96,10 +125,7 @@ def scan(
     )
     orchestrator.run()
     # Save pointer to last scan
-    try:
-        (Path("output") / ".last").write_text(str(ws.path))
-    except Exception:
-        pass
+    _write_last_pointer(ws.path)
 
 
 @app.command()
@@ -457,10 +483,7 @@ def _run_job(manager, job) -> None:
     if result["status"] != "done":
         console.print(f"[yellow]Resume where it left off: "
                       f"python suvari.py auto --resume {job.id}[/yellow]")
-    try:
-        (Path("output") / ".last").write_text(str(job_dir))
-    except Exception:
-        pass
+    _write_last_pointer(job_dir)
 
 
 def _print_jobs(manager) -> None:
@@ -523,10 +546,7 @@ def _auto_legacy(url, output, provider, model, max_steps, time_budget,
     console.print(f"[bold][DOC] Report:[/bold] {result['report']}")
     from .auto.usage import format_summary
     console.print(f"[dim]{format_summary(result.get('usage') or {})}[/dim]")
-    try:
-        (Path("output") / ".last").write_text(str(root))
-    except Exception:
-        pass
+    _write_last_pointer(root)
 
 
 def normalize_auto_argv(argv: list[str]) -> list[str]:
