@@ -122,14 +122,9 @@ def stubbed_run(monkeypatch):
     monkeypatch.delenv("SUVARI_MCP_TOKEN", raising=False)
     for name in ("host", "port", "transport_security"):
         monkeypatch.setattr(mcp.settings, name, getattr(mcp.settings, name))
-    server_logger = logging.getLogger("mcp.server.server")
-    monkeypatch.setattr(server_logger, "info", server_logger.info)
-    mcp_logger = logging.getLogger("mcp")
-    level = mcp_logger.level
+    # configure_logging(force=True) would drop pytest's caplog handler
+    monkeypatch.setattr(mcp_server, "configure_logging", lambda *a, **k: None)
     yield
-    mcp_logger.setLevel(level)
-    if hasattr(mcp, "_orig_log"):
-        del mcp._orig_log
 
 
 def test_run_server_warns_and_allows_host_on_network_bind(stubbed_run, caplog):

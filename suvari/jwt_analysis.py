@@ -5,8 +5,12 @@ Tests: algorithm confusion, none algorithm, brute force, expiration.
 
 import json
 import base64
+import logging
 import subprocess
 from typing import Optional
+from .logging_setup import log_swallowed
+
+log = logging.getLogger("suvari.jwt_analysis")
 
 
 def decode_jwt(token: str) -> dict:
@@ -81,8 +85,8 @@ def test_algorithm_confusion(token: str) -> list:
                 "secret_tried": secret,
                 "procedure": f"Changed alg from RS256 to HS256 with secret='{secret}'",
             })
-    except Exception:
-        pass
+    except Exception as e:
+        log_swallowed(log, "JWT algorithm-confusion test failed", e)
 
     return findings
 

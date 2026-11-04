@@ -3,12 +3,15 @@ Chat — minimal UI for SuvariCore chat.
 All logic is in core.py. This is just the terminal interface.
 """
 
+import logging
 from pathlib import Path
 from datetime import datetime
 from rich.console import Console
 from rich.prompt import Prompt
 from .core import SuvariCore
+from .logging_setup import log_swallowed
 
+log = logging.getLogger("suvari.chat")
 console = Console()
 
 
@@ -19,7 +22,8 @@ def start():
     try:
         Path("output/chat").mkdir(parents=True, exist_ok=True)
         Path(session_file).write_text(f"# Suvari Chat\nStarted: {datetime.now().isoformat()[:19]}\n\n")
-    except Exception:
+    except Exception as e:
+        log_swallowed(log, "could not create chat session file %s", e, session_file)
         session_file = None
 
     console.print("[bold][SUVARI] Pentest Chat[/bold]")

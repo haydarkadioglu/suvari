@@ -6,7 +6,11 @@ Focused recon + vulnerability hunting + OSINT for bug bounty targets.
 """
 
 from .base import BaseAgent
+from ..logging_setup import log_swallowed
+import logging
 import time
+
+log = logging.getLogger("suvari.agents.bugbounty")
 
 
 class BugBountyAgent(BaseAgent):
@@ -99,8 +103,8 @@ class BugBountyAgent(BaseAgent):
                     if name and name.endswith(domain):
                         for n in name.split("\n"):
                             found.add(n.strip().lower())
-        except Exception:
-            pass
+        except Exception as e:
+            log_swallowed(log, "crt.sh subdomain lookup failed for %s", e, domain)
 
         # Method 3: AlienVault OTX (free, no API key)
         try:
@@ -116,8 +120,8 @@ class BugBountyAgent(BaseAgent):
                     host = entry.get("hostname", "").strip().lower()
                     if host and host.endswith(domain) and host != domain:
                         found.add(host)
-        except Exception:
-            pass
+        except Exception as e:
+            log_swallowed(log, "passive DNS subdomain lookup failed for %s", e, domain)
 
         # Method 4: dnsenum (tight timeout)
         if self.tools.check_tool("dnsenum"):

@@ -4,8 +4,12 @@ Inspired by HexStrike's attack chain discovery.
 """
 
 import json
+import logging
 from typing import Optional
 from .llm import LLMClient
+from .logging_setup import log_swallowed
+
+log = logging.getLogger("suvari.attack_chain")
 
 
 class AttackChain:
@@ -165,6 +169,6 @@ Return as JSON array: [{{"chain": "name", "steps": ["step1","step2"], "impact": 
             if text.startswith("json"): text = text[4:].strip()
             if text.startswith("["):
                 return json.loads(text)
-        except Exception:
-            pass
+        except Exception as e:
+            log_swallowed(log, "LLM attack-chain suggestion failed", e)
         return []

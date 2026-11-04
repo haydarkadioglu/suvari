@@ -3,9 +3,12 @@ Prompt Loader — loads and renders Jinja2 prompt templates from prompt files.
 Inspired by Shannon's modular prompt structure and LuaN1aoAgent's Jinja2 templates.
 """
 
+import logging
 from pathlib import Path
 from typing import Optional
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
+
+log = logging.getLogger("suvari.prompt_loader")
 
 PROMPT_DIR = Path(__file__).parent / "prompts"
 
@@ -55,8 +58,9 @@ class PromptLoader:
                 shared_template = self.env.get_template(f"shared/{shared_file}.txt")
                 context = {**self.globals, **kwargs}
                 parts.append(shared_template.render(**context))
-            except Exception:
-                pass  # shared fragment might not exist
+            except Exception as e:
+                # Shared fragments are optional.
+                log.debug("shared prompt fragment %s not rendered: %s", shared_file, e)
 
         # Phase-specific prompt
         parts.append(self.render(phase, **kwargs))

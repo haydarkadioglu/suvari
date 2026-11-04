@@ -3,11 +3,15 @@ CVE Intelligence — looks up vulnerabilities for detected technologies.
 Uses searchsploit (local) and CVE APIs.
 """
 
+import logging
 import subprocess
 import json
 import re
 from typing import Optional
 from .llm import LLMClient
+from .logging_setup import log_swallowed
+
+log = logging.getLogger("suvari.cve_intel")
 
 
 # Tech patterns to extract version info
@@ -55,8 +59,10 @@ def query_searchsploit(technology: str, version: str) -> list:
                     "path": entry.get("Path", ""),
                     "type": "exploit",
                 })
-    except Exception:
-        pass
+    except FileNotFoundError:
+        log.debug("searchsploit not installed; skipping local exploit lookup")
+    except Exception as e:
+        log_swallowed(log, "searchsploit query failed for %s %s", e, technology, version)
     return results
 
 
@@ -79,8 +85,8 @@ def query_cve_api(technology: str, version: str) -> list:
                     "cvss": cve.get("cvss", "N/A"),
                     "cpe": cve.get("vulnerable_configuration", [{}])[0].get("id", "") if cve.get("vulnerable_configuration") else "",
                 })
-    except Exception:
-        pass
+    except Exception as e:
+        log_swallowed(log, "CIRCL CVE query failed for %s %s", e, technology, version)
 
     if not results:
         # Fallback: try NVD API
@@ -107,8 +113,8 @@ def query_cve_api(technology: str, version: str) -> list:
                         "summary": cve.get("descriptions", [{}])[0].get("value", "")[:200],
                         "cvss": cvss_score,
                     })
-        except Exception:
-            pass
+        except Exception as e:
+            log_swallowed(log, "NVD CVE query failed for %s %s", e, technology, version)
 
     return results
 

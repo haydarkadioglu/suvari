@@ -3,11 +3,14 @@ Analyzer Agent — AI-powered analysis of scan results with robust text parsing.
 Shows clear errors when AI is unavailable.
 """
 
+import logging
 import time
 import re
 import json
 from .base import BaseAgent, fmt_time
 from ..prompt_loader import PromptLoader
+
+log = logging.getLogger("suvari.agents.analyzer")
 
 
 class AnalyzerAgent(BaseAgent):
@@ -102,8 +105,8 @@ class AnalyzerAgent(BaseAgent):
                 data = json.loads(cleaned)
                 if "vulnerabilities" in data:
                     return data["vulnerabilities"]
-            except json.JSONDecodeError:
-                pass
+            except json.JSONDecodeError as e:
+                log.debug("analysis output is not valid JSON, using text fallback: %s", e)
 
         lines = text.split("\n")
         severity_indicators = {

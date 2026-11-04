@@ -8,12 +8,16 @@ the hypotheses that were tried and refuted, and recommendations.
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 from pathlib import Path
 
 from .hypothesis import STATUS_CONFIRMED, STATUS_REFUTED
 from .state import ScanState
 from .usage import format_summary, human_tokens
+from ..logging_setup import log_swallowed
+
+log = logging.getLogger("suvari.auto.report")
 
 _SEV_ORDER = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3, "INFO": 4}
 
@@ -233,8 +237,8 @@ def write_job_report(job, job_dir: Path, final: bool = False) -> Path:
         if sf.exists():
             try:
                 states[t.key] = ScanState.load(job_dir, state_file=sf)
-            except (OSError, ValueError, KeyError):
-                pass
+            except (OSError, ValueError, KeyError) as e:
+                log_swallowed(log, "could not load state for target %s from %s", e, t.key, sf)
 
     all_findings = [f for st in states.values() for f in st.findings]
     c = job.counters
